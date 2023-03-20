@@ -219,6 +219,23 @@ func (f *Field[T]) Reduce(a *Element[T]) *Element[T] {
 	return e
 }
 
+// Reduce reduces a modulo the field order and returns it. Uses hint [RemHint].
+func (f *Field[T]) ReduceWithoutConstantCheck(a *Element[T]) *Element[T] {
+	f.enforceWidthConditional(a)
+	if a.overflow == 0 {
+		// fast path - already reduced, omit reduction.
+		return a
+	}
+
+	// slow path - use hint to reduce value
+	e, err := f.computeRemHint(a, f.Modulus())
+	if err != nil {
+		panic(fmt.Sprintf("reduction hint: %v", err))
+	}
+	f.AssertIsEqual(e, a)
+	return e
+}
+
 // Sub subtracts b from a and returns it. Reduces locally if wouldn't fit into
 // Element. Doesn't mutate inputs.
 func (f *Field[T]) Sub(a, b *Element[T]) *Element[T] {

@@ -40,3 +40,14 @@ func (f *Field[T]) FromBits(bs ...frontend.Variable) *Element[T] {
 	limbs[nbLimbs-1] = bits.FromBinary(f.api, bs[(nbLimbs-1)*f.fParams.BitsPerLimb():])
 	return f.newInternalElement(limbs, 0)
 }
+
+// FromBits returns a new Element given the bits is little-endian order.
+func (f *Field[T]) FromBitsOverflow(bs ...frontend.Variable) *Element[T] {
+	nbLimbs := (uint(len(bs)) + f.fParams.BitsPerLimb() - 1) / f.fParams.BitsPerLimb()
+	limbs := make([]frontend.Variable, nbLimbs)
+	for i := uint(0); i < nbLimbs-1; i++ {
+		limbs[i] = bits.FromBinary(f.api, bs[i*f.fParams.BitsPerLimb():(i+1)*f.fParams.BitsPerLimb()])
+	}
+	limbs[nbLimbs-1] = bits.FromBinary(f.api, bs[(nbLimbs-1)*f.fParams.BitsPerLimb():])
+	return f.newInternalElement(limbs, 1)
+}

@@ -204,6 +204,7 @@ contract Verifier {
         Pairing.G1Point A;
         Pairing.G2Point B;
         Pairing.G1Point C;
+        Pairing.G1Point Commit;
     }
 
     function verifyingKey() internal pure returns (VerifyingKey memory vk) {
@@ -243,6 +244,7 @@ contract Verifier {
         uint256[2] memory a,
         uint256[2][2] memory b,
         uint256[2] memory c,
+        uint256[2] memory commit,
         uint256[{{sub $lenK 1}}] calldata input
     ) public view returns (bool r) {
 
@@ -250,6 +252,7 @@ contract Verifier {
         proof.A = Pairing.G1Point(a[0], a[1]);
         proof.B = Pairing.G2Point([b[0][0], b[0][1]], [b[1][0], b[1][1]]);
         proof.C = Pairing.G1Point(c[0], c[1]);
+        proof.Commit = Pairing.G1Point(commit[0], commit[1]);
 
         // Make sure that proof.A, B, and C are each less than the prime q
         require(proof.A.X < PRIME_Q, "verifier-aX-gte-prime-q");
@@ -302,6 +305,9 @@ contract Verifier {
         accumulate(mul_input, q, add_input, vk_x); // vk_x += vk.K[{{$i}}] * input[{{$j}}]
             {{- end -}}
         {{- end }}
+        if (commit[0] != 0 || commit[1] != 0) {
+            vk_x = Pairing.plus(vk_x, proof.Commit);
+        }
 
         return Pairing.pairing(
             Pairing.negate(proof.A),
