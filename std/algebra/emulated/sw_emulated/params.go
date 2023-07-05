@@ -50,6 +50,20 @@ func GetBN254Params() CurveParams {
 	}
 }
 
+// GetBLS12381Params returns the curve parameters for the curve bls12-381.
+// When initialising new curve, use the base field [emulated.BLS12381Fp] and scalar
+// field [emulated.BLS12381Fr].
+func GetBLS12381Params() CurveParams {
+	gx, _ := new(big.Int).SetString("17f1d3a73197d7942695638c4fa9ac0fc3688c4f9774b905a14e3a3f171bac586c55e83ff97a1aeffb3af00adb22c6bb", 16)
+	gy, _ := new(big.Int).SetString("08b3f481e3aaa0f1a09e30ed741d8ae4fcf5e095d5d00af600db18cb2c04b3edd03cc744a2888ae40caa232946c5e7e1", 16)
+	return CurveParams{
+		A:  big.NewInt(0),
+		B:  big.NewInt(4),
+		Gx: gx,
+		Gy: gy,
+	}
+}
+
 // GetCurveParams returns suitable curve parameters given the parametric type Base as base field.
 func GetCurveParams[Base emulated.FieldParams]() CurveParams {
 	var t Base
@@ -58,6 +72,8 @@ func GetCurveParams[Base emulated.FieldParams]() CurveParams {
 		return secp256k1Params
 	case "30644e72e131a029b85045b68181585d97816a916871ca8d3c208c16d87cfd47":
 		return bn254Params
+	case "1a0111ea397fe69a4b1ba7b6434bacd764774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab":
+		return bls12381Params
 	default:
 		panic("no stored parameters")
 	}
@@ -66,9 +82,11 @@ func GetCurveParams[Base emulated.FieldParams]() CurveParams {
 var (
 	secp256k1Params CurveParams
 	bn254Params     CurveParams
+	bls12381Params  CurveParams
 )
 
 func init() {
 	secp256k1Params = GetSecp256k1Params()
 	bn254Params = GetBN254Params()
+	bls12381Params = GetBLS12381Params()
 }
