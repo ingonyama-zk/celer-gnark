@@ -32,6 +32,7 @@ import (
 	"math/big"
 	"runtime"
 	"time"
+	"unsafe"
 	icicle "github.com/ingonyama-zk/icicle/goicicle/curves/bn254"
 	goicicle "github.com/ingonyama-zk/icicle/goicicle"
 )
@@ -385,6 +386,14 @@ func computeH(a, b, c []fr.Element, domain *fft.Domain) []fr.Element {
 	b = append(b, padding...)
 	c = append(c, padding...)
 	n = len(a)
+
+	aCopy := make([]fr.Element, n)
+	copy(aCopy, a)
+	bCopy := make([]fr.Element, n)
+	copy(bCopy, b)
+	cCopy := make([]fr.Element, n)
+	copy(cCopy, c)
+	sizeBytes := n * fr.Bytes
 	
 	log := logger.Logger()
 
@@ -403,77 +412,127 @@ func computeH(a, b, c []fr.Element, domain *fft.Domain) []fr.Element {
 	log.Debug().Dur("took", time.Since(start_twid)).Msg("Icicle API: Twiddles")
 	
 	start_cosetPower_api := time.Now()
-	cosetPowers_d, _ := goicicle.CudaMalloc(n*fr.Bytes)
+	cosetPowers_d, _ := goicicle.CudaMalloc(sizeBytes)
 	cosetTable := icicle.BatchConvertFromFrGnark[icicle.ScalarField](domain.CosetTable)
-	goicicle.CudaMemCpyHtoD[icicle.ScalarField](cosetPowers_d, cosetTable, n*fr.Bytes)
+	goicicle.CudaMemCpyHtoD[icicle.ScalarField](cosetPowers_d, cosetTable, sizeBytes)
 	log.Debug().Dur("took", time.Since(start_cosetPower_api)).Msg("Icicle API: Copy Coset")
 
 	start_cosetPower_api = time.Now()
-	cosetPowersInv_d, _ := goicicle.CudaMalloc(n*fr.Bytes)
+	cosetPowersInv_d, _ := goicicle.CudaMalloc(sizeBytes)
 	cosetTableInv := icicle.BatchConvertFromFrGnark[icicle.ScalarField](domain.CosetTableInv)
-	goicicle.CudaMemCpyHtoD[icicle.ScalarField](cosetPowersInv_d, cosetTableInv, n*fr.Bytes)
+	goicicle.CudaMemCpyHtoD[icicle.ScalarField](cosetPowersInv_d, cosetTableInv, sizeBytes)
 	log.Debug().Dur("took", time.Since(start_cosetPower_api)).Msg("Icicle API: Copy Coset Inv")
+
+	var denI, oneI fr.Element
+	oneI.SetOne()
+	denI.Exp(domain.FrMultiplicativeGen, big.NewInt(int64(domain.Cardinality)))
+	denI.Sub(&denI, &oneI).Inverse(&denI)
+
+	den_d, _ := goicicle.CudaMalloc(sizeBytes)
+	log2Size := int(math.Floor(math.Log2(float64(n))))
+	denIcicle := *icicle.NewFieldFromFrGnark[icicle.ScalarField](denI)
+	denIcicleArr := []icicle.ScalarField{denIcicle}
+	for i := 0; i < log2Size; i++ {
+		denIcicleArr = append(denIcicleArr, denIcicleArr...)
+	}
+	for i := 0; i < (n - int(math.Pow(2, float64(log2Size)))); i++ {
+		denIcicleArr = append(denIcicleArr, denIcicle)
+	}
+
+	goicicle.CudaMemCpyHtoD[icicle.ScalarField](den_d, denIcicleArr, sizeBytes)
 
 	/*********** END SETUP **********/
 
-	a_intt_d, a_device, timings_a := INttOnDevice(a, twiddles_inv_d, nil, n, n*fr.Bytes, false)
-	log.Debug().Dur("took", timings_a[0]).Msg("Icicle API: INTT A Conv")
-	log.Debug().Dur("took", timings_a[1]).Msg("Icicle API: INTT A Copy")
-	log.Debug().Dur("took", timings_a[2]).Msg("Icicle API: INTT A Reverse")
-	log.Debug().Dur("took", timings_a[3]).Msg("Icicle API: INTT A Interp")
+	/*********** Copy a,b,c to Device Start ************/
+	computeHTime := time.Now()
+	copyADone := make(chan unsafe.Pointer, 1)
+	copyBDone := make(chan unsafe.Pointer, 1)
+	copyCDone := make(chan unsafe.Pointer, 1)
+	copyToDevice := func (scalars []fr.Element, copyDone chan unsafe.Pointer) {
+		a_device, _ := goicicle.CudaMalloc(sizeBytes)
+		scalarsIcicleA := icicle.BatchConvertFromFrGnarkThreaded[icicle.ScalarField](scalars, 7)
+		goicicle.CudaMemCpyHtoD[icicle.ScalarField](a_device, scalarsIcicleA, sizeBytes)
+
+		copyDone <- a_device
+	}
+
+	convTime := time.Now()
+	go copyToDevice(a, copyADone)
+	go copyToDevice(b, copyBDone)
+	go copyToDevice(c, copyCDone)
+
+	a_device := <- copyADone
+	b_device := <- copyBDone
+	c_device := <- copyCDone
+
+	log.Debug().Dur("took", time.Since(convTime)).Msg("Icicle API: Conv and Copy a,b,c")
+	/*********** Copy a,b,c to Device End ************/
+
+	a_intt_d, timings_a := INttOnDevice(a_device, twiddles_inv_d, nil, n, sizeBytes, false)
+	log.Debug().Dur("took", timings_a[0]).Msg("Icicle API: INTT A Reverse")
+	log.Debug().Dur("took", timings_a[1]).Msg("Icicle API: INTT A Interp")
 	
-	b_intt_d, b_device, timings_b := INttOnDevice(b, twiddles_inv_d, nil, n, n*fr.Bytes, false)
-	log.Debug().Dur("took", timings_b[0]).Msg("Icicle API: INTT B Conv")
-	log.Debug().Dur("took", timings_b[1]).Msg("Icicle API: INTT B Copy")
-	log.Debug().Dur("took", timings_b[2]).Msg("Icicle API: INTT B Reverse")
-	log.Debug().Dur("took", timings_b[3]).Msg("Icicle API: INTT B Interp")
+	b_intt_d, timings_b := INttOnDevice(b_device, twiddles_inv_d, nil, n, sizeBytes, false)
+	log.Debug().Dur("took", timings_b[0]).Msg("Icicle API: INTT B Reverse")
+	log.Debug().Dur("took", timings_b[1]).Msg("Icicle API: INTT B Interp")
 
-	c_intt_d, c_device, timings_c := INttOnDevice(c, twiddles_inv_d, nil, n, n*fr.Bytes, false)
-	log.Debug().Dur("took", timings_c[0]).Msg("Icicle API: INTT C Conv")
-	log.Debug().Dur("took", timings_c[1]).Msg("Icicle API: INTT C Copy")
-	log.Debug().Dur("took", timings_c[2]).Msg("Icicle API: INTT C Reverse")
-	log.Debug().Dur("took", timings_c[3]).Msg("Icicle API: INTT C Interp")
+	c_intt_d, timings_c := INttOnDevice(c_device, twiddles_inv_d, nil, n, sizeBytes, false)
+	log.Debug().Dur("took", timings_c[0]).Msg("Icicle API: INTT C Reverse")
+	log.Debug().Dur("took", timings_c[1]).Msg("Icicle API: INTT C Interp")
 
 
-	a, timing_a2 := NttOnDevice(a_device, a_intt_d, twiddles_d, cosetPowers_d, n, n, n*fr.Bytes, true)
-	log.Debug().Dur("took", timing_a2[3]).Msg("Icicle API: NTT Coset A Conv")
-	log.Debug().Dur("took", timing_a2[2]).Msg("Icicle API: NTT Coset A Copy")
+	timing_a2 := NttOnDevice(a_device, a_intt_d, twiddles_d, cosetPowers_d, n, n, sizeBytes, true)
 	log.Debug().Dur("took", timing_a2[1]).Msg("Icicle API: NTT Coset A Reverse")
 	log.Debug().Dur("took", timing_a2[0]).Msg("Icicle API: NTT Coset A Eval")
 
-	b, timings_b2 := NttOnDevice(b_device, b_intt_d, twiddles_d, cosetPowers_d, n, n, n*fr.Bytes, true)
-	log.Debug().Dur("took", timings_b2[3]).Msg("Icicle API: NTT Coset B Conv")
-	log.Debug().Dur("took", timings_b2[2]).Msg("Icicle API: NTT Coset B Copy")
+	timings_b2 := NttOnDevice(b_device, b_intt_d, twiddles_d, cosetPowers_d, n, n, sizeBytes, true)
 	log.Debug().Dur("took", timings_b2[1]).Msg("Icicle API: NTT Coset B Reverse")
 	log.Debug().Dur("took", timings_b2[0]).Msg("Icicle API: NTT Coset B Eval")
 
-	c, timings_c2 := NttOnDevice(c_device, c_intt_d, twiddles_d, cosetPowers_d, n, n, n*fr.Bytes, true)
-	log.Debug().Dur("took", timings_c2[3]).Msg("Icicle API: NTT Coset C Conv")
-	log.Debug().Dur("took", timings_c2[2]).Msg("Icicle API: NTT Coset C Copy")
+	timings_c2 := NttOnDevice(c_device, c_intt_d, twiddles_d, cosetPowers_d, n, n, sizeBytes, true)
 	log.Debug().Dur("took", timings_c2[1]).Msg("Icicle API: NTT Coset C Reverse")
 	log.Debug().Dur("took", timings_c2[0]).Msg("Icicle API: NTT Coset C Eval")
 
+	poltime := PolyOps(a_device, b_device, c_device, den_d, n)
+	log.Debug().Dur("took", poltime[0]).Msg("Icicle API: PolyOps Mul a b")
+	log.Debug().Dur("took", poltime[1]).Msg("Icicle API: PolyOps Sub a c")
+	log.Debug().Dur("took", poltime[2]).Msg("Icicle API: PolyOps Mul a den")
 
+	final, timings_final := INttOnDevice(a_device, twiddles_inv_d, cosetPowersInv_d, n, sizeBytes, true)
+	log.Debug().Dur("took", timings_final[0]).Msg("Icicle API: INTT Coset Reverse")
+	log.Debug().Dur("took", timings_final[1]).Msg("Icicle API: INTT Coset Interp")
+	
+	icicle.ReverseScalars(final, n)
+
+	a_host := make([]icicle.ScalarField, n)
+	goicicle.CudaMemCpyDtoH[icicle.ScalarField](a_host, final, sizeBytes)
+	threadedTime := time.Now()
+	a = icicle.BatchConvertToFrGnarkThreaded[icicle.ScalarField](a_host, 7)
+	log.Debug().Dur("took", time.Since(threadedTime)).Msg("Icicle API: Conv A Final")
+	log.Debug().Dur("took", time.Since(computeHTime)).Msg("Icicle API: computeH")
+	
+	
 	// original
-	// start_orig_api := time.Now()
-	// domain.FFTInverse(a, fft.DIF)
-	// log.Debug().Dur("took", time.Since(start_orig_api)).Msg("Original API: INTT A")
-	// start_orig_api = time.Now()
-	// domain.FFTInverse(b, fft.DIF)
-	// log.Debug().Dur("took", time.Since(start_orig_api)).Msg("Original API: INTT B")
-	// start_orig_api = time.Now()
-	// log.Debug().Dur("took", time.Since(start_orig_api)).Msg("Original API: INTT C")
-	// domain.FFTInverse(c, fft.DIF)
+	computeHTimeOrig := time.Now()
+	start_orig_api := time.Now()
+	domain.FFTInverse(aCopy, fft.DIF)
+	log.Debug().Dur("took", time.Since(start_orig_api)).Msg("Original API: INTT A")
+	start_orig_api = time.Now()
+	domain.FFTInverse(bCopy, fft.DIF)
+	log.Debug().Dur("took", time.Since(start_orig_api)).Msg("Original API: INTT B")
+	start_orig_api = time.Now()
+	domain.FFTInverse(cCopy, fft.DIF)
+	log.Debug().Dur("took", time.Since(start_orig_api)).Msg("Original API: INTT C")
 
-	// start_orig_api = time.Now()
-	// domain.FFT(a, fft.DIT, fft.OnCoset())
-	// log.Debug().Dur("took", time.Since(start_orig_api)).Msg("Original API: NTT Coset A")
-	// start_orig_api = time.Now()
-	// domain.FFT(b, fft.DIT, fft.OnCoset())
-	// log.Debug().Dur("took", time.Since(start_orig_api)).Msg("Original API: NTT Coset B")
-	// start_orig_api = time.Now()
-	// domain.FFT(c, fft.DIT, fft.OnCoset())
-	// log.Debug().Dur("took", time.Since(start_orig_api)).Msg("Original API: NTT Coset C")
+	start_orig_api = time.Now()
+	domain.FFT(aCopy, fft.DIT, fft.OnCoset())
+	log.Debug().Dur("took", time.Since(start_orig_api)).Msg("Original API: NTT Coset A")
+	start_orig_api = time.Now()
+	domain.FFT(bCopy, fft.DIT, fft.OnCoset())
+	log.Debug().Dur("took", time.Since(start_orig_api)).Msg("Original API: NTT Coset B")
+	start_orig_api = time.Now()
+	domain.FFT(cCopy, fft.DIT, fft.OnCoset())
+	log.Debug().Dur("took", time.Since(start_orig_api)).Msg("Original API: NTT Coset C")
 
 	var den, one fr.Element
 	one.SetOne()
@@ -482,30 +541,21 @@ func computeH(a, b, c []fr.Element, domain *fft.Domain) []fr.Element {
 
 	// h = ifft_coset(ca o cb - cc)
 	// reusing a to avoid unnecessary memory allocation
+	poly_ops := time.Now()
 	utils.Parallelize(n, func(start, end int) {
 		for i := start; i < end; i++ {
-			a[i].Mul(&a[i], &b[i]).
-				Sub(&a[i], &c[i]).
-				Mul(&a[i], &den)
+			aCopy[i].Mul(&aCopy[i], &bCopy[i]).
+				Sub(&aCopy[i], &cCopy[i]).
+				Mul(&aCopy[i], &den)
 		}
 	})
+	log.Debug().Dur("took", time.Since(poly_ops)).Msg("Original API: PolyOps")
 
 	// ifft_coset
-	final, _, timings_final := INttOnDevice(a, twiddles_inv_d, cosetPowersInv_d, n, n*fr.Bytes, true)
-	log.Debug().Dur("took", timings_final[0]).Msg("Icicle API: INTT Coset Conv")
-	log.Debug().Dur("took", timings_final[1]).Msg("Icicle API: INTT Coset Copy")
-	log.Debug().Dur("took", timings_final[2]).Msg("Icicle API: INTT Coset Reverse")
-	log.Debug().Dur("took", timings_final[3]).Msg("Icicle API: INTT Coset Interp")
-	
-	icicle.ReverseScalars(final, n)
-
-	a_host := make([]icicle.ScalarField, n)
-	goicicle.CudaMemCpyDtoH[icicle.ScalarField](a_host, final, n*fr.Bytes)
-	a = icicle.BatchConvertToFrGnark[icicle.ScalarField](a_host)
-	
-	// start_orig_api = time.Now()
-	// domain.FFTInverse(a, fft.DIF, fft.OnCoset())
-	// log.Debug().Dur("took", time.Since(start_orig_api)).Msg("Original API: INTT Coset A")
+	start_orig_api = time.Now()
+	domain.FFTInverse(aCopy, fft.DIF, fft.OnCoset())
+	log.Debug().Dur("took", time.Since(start_orig_api)).Msg("Original API: INTT Coset A")
+	log.Debug().Dur("took", time.Since(computeHTimeOrig)).Msg("Original API: computeH")
 	
 	return a
 }
