@@ -190,16 +190,19 @@ func PolyOps(a_d, b_d, c_d, den_d unsafe.Pointer, size int) (timings []time.Dura
 	return
 }
 
-func MsmOnDevice(scalars_d, points_d unsafe.Pointer, count int, convert bool) (curve.G1Jac, unsafe.Pointer, error) {
+func MsmOnDevice(scalars_d, points_d unsafe.Pointer, count int, convert bool) (curve.G1Jac, unsafe.Pointer, error, time.Duration) {
 	out_d, _ := cudawrapper.CudaMalloc(96)
+
+	msmTime := time.Now()
 	icicle.Commit(out_d, scalars_d, points_d, count)
+	timings := time.Since(msmTime)
 
 	if convert {
 		outHost := make([]icicle.PointBN254, 1)
 		cudawrapper.CudaMemCpyDtoH[icicle.PointBN254](outHost, out_d, 96)
-		return *outHost[0].ToGnarkJac(), nil, nil
+		return *outHost[0].ToGnarkJac(), nil, nil, timings
 	}
 
-	return curve.G1Jac{}, out_d, nil
+	return curve.G1Jac{}, out_d, nil, timings
 
 }

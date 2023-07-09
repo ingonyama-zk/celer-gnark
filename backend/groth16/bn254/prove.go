@@ -27,7 +27,6 @@ import (
 	"github.com/consensys/gnark/backend/witness"
 	"github.com/consensys/gnark/constraint/bn254"
 	"github.com/consensys/gnark/constraint/solver"
-	"github.com/consensys/gnark/internal/utils"
 	"github.com/consensys/gnark/logger"
 	"math/big"
 	"runtime"
@@ -107,7 +106,7 @@ func Prove(r1cs *cs.R1CS, pk *ProvingKey, fullWitness witness.Witness, opts ...b
 	start := time.Now()
 
 	// H (witness reduction / FFT part)
-	var h []fr.Element
+	var h unsafe.Pointer
 	chHDone := make(chan struct{}, 1)
 	go func() {
 		h = computeH(solution.A, solution.B, solution.C, &pk.Domain)
@@ -166,137 +165,100 @@ func Prove(r1cs *cs.R1CS, pk *ProvingKey, fullWitness witness.Witness, opts ...b
 
 	n := runtime.NumCPU()
 
-	chBs1Done := make(chan error, 1)
 	computeBS1 := func() {
 		<-chWireValuesB
+
+		pointsBytes := len(pk.G1.B)*64
+		points_d, _ := goicicle.CudaMalloc(pointsBytes)
+		parsedPoints := icicle.BatchConvertFromG1Affine(pk.G1.B)
+		goicicle.CudaMemCpyHtoD[icicle.PointAffineNoInfinityBN254](points_d, parsedPoints, pointsBytes)
 		
-		_, err := bs1.MultiExp(pk.G1.B, wireValuesB, ecc.MultiExpConfig{NbTasks: n / 2})
 
-		// bs1_time := time.Now()
-		icicleRes, _, timings := MsmBN254GnarkAdapter(pk.G1.B, wireValuesB)
-		log.Debug().Dur("took", timings[0]).Msg("Icicle API: MSM BS1 Conv S")
-		log.Debug().Dur("took", timings[1]).Msg("Icicle API: MSM BS1 Conv P")
-		log.Debug().Dur("took", timings[2]).Msg("Icicle API: MSM BS1 MSM")
+		scals := wireValuesB
+		scalarBytes := len(scals)*32
+		scalars_d, _ := goicicle.CudaMalloc(scalarBytes)
+		scalarsIcicle := icicle.BatchConvertFromFrGnark[icicle.ScalarField](scals)
+		goicicle.CudaMemCpyHtoD[icicle.ScalarField](scalars_d, scalarsIcicle, scalarBytes)
 		
-		if err != nil {
-			chBs1Done <- err
-			close(chBs1Done)
-			return
-		}
-
-		if bs1.Equal(&icicleRes) {
-			log.Info().Msg("BS1 MSM was correct")
-			bs1 = icicleRes
-		}
-
+		icicleRes, _, _, time := MsmOnDevice(scalars_d, points_d, len(scals), true)
+		log.Debug().Dur("took", time).Msg("Icicle API: MSM BS1 MSM")
+		
+		bs1 = icicleRes
 		bs1.AddMixed(&pk.G1.Beta)
 		bs1.AddMixed(&deltas[1])
-		chBs1Done <- nil
 	}
 
-	chArDone := make(chan error, 1)
 	computeAR1 := func() {
 		<-chWireValuesA
-		_, err := ar.MultiExp(pk.G1.A, wireValuesA, ecc.MultiExpConfig{NbTasks: n / 2})
 
-		// ar_time := time.Now()
-		icicleRes, _, timings := MsmBN254GnarkAdapter(pk.G1.A, wireValuesA)
-		log.Debug().Dur("took", timings[0]).Msg("Icicle API: MSM AR Conv S")
-		log.Debug().Dur("took", timings[1]).Msg("Icicle API: MSM AR Conv P")
-		log.Debug().Dur("took", timings[2]).Msg("Icicle API: MSM AR MSM")
+		pointsBytes := len(pk.G1.A)*64
+		points_d, _ := goicicle.CudaMalloc(pointsBytes)
+		parsedPoints := icicle.BatchConvertFromG1Affine(pk.G1.A)
+		goicicle.CudaMemCpyHtoD[icicle.PointAffineNoInfinityBN254](points_d, parsedPoints, pointsBytes)
+		
 
-		if err != nil {
-			chArDone <- err
-			close(chArDone)
-			return
-		}
-
-		if ar.Equal(&icicleRes) {
-			log.Info().Msg("A MSM was correct")
-			ar = icicleRes
-		}
-
+		scals := wireValuesA
+		scalarBytes := len(scals)*32
+		scalars_d, _ := goicicle.CudaMalloc(scalarBytes)
+		scalarsIcicle := icicle.BatchConvertFromFrGnark[icicle.ScalarField](scals)
+		goicicle.CudaMemCpyHtoD[icicle.ScalarField](scalars_d, scalarsIcicle, scalarBytes)
+		
+		icicleRes, _, _, time := MsmOnDevice(scalars_d, points_d, len(scals), true)
+		log.Debug().Dur("took", time).Msg("Icicle API: MSM AR1 MSM")
+		
+		ar = icicleRes
 		ar.AddMixed(&pk.G1.Alpha)
 		ar.AddMixed(&deltas[0])
 		proof.Ar.FromJacobian(&ar)
-		chArDone <- nil
 	}
 
-	chKrsDone := make(chan error, 1)
 	computeKRS := func() {
 		// we could NOT split the Krs multiExp in 2, and just append pk.G1.K and pk.G1.Z
 		// however, having similar lengths for our tasks helps with parallelism
 
 		var krs, krs2, p1 curve.G1Jac
-		chKrs2Done := make(chan error, 1)
 		sizeH := int(pk.Domain.Cardinality - 1) // comes from the fact the deg(H)=(n-1)+(n-1)-n=n-2
-		go func() {
-			_, err := krs2.MultiExp(pk.G1.Z, h[:sizeH], ecc.MultiExpConfig{NbTasks: n / 2})
-			
-			// krs2_time := time.Now()
-			icicleRes, _, timings := MsmBN254GnarkAdapter(pk.G1.Z, h[:sizeH])
-			// log.Debug().Dur("took", time.Since(krs2_time)).Msg("Icicle API: MSM KRS2")
-			log.Debug().Dur("took", timings[0]).Msg("Icicle API: MSM KRS2 Conv S")
-			log.Debug().Dur("took", timings[1]).Msg("Icicle API: MSM KRS2 Conv P")
-			log.Debug().Dur("took", timings[2]).Msg("Icicle API: MSM KRS2 MSM")
+		
+		pointsBytes := len(pk.G1.Z)*64
+		points_d, _ := goicicle.CudaMalloc(pointsBytes)
+		parsedPoints := icicle.BatchConvertFromG1Affine(pk.G1.Z)
+		goicicle.CudaMemCpyHtoD[icicle.PointAffineNoInfinityBN254](points_d, parsedPoints, pointsBytes)
 
-			if krs2.Equal(&icicleRes) {
-				log.Info().Msg("KRS2 MSM was correct")
-				krs2 = icicleRes
-			}
-			chKrs2Done <- err
-		}()
+		icicleRes, _, _, time := MsmOnDevice(h, points_d, sizeH, true)
 
+		log.Debug().Dur("took", time).Msg("Icicle API: MSM KRS2 MSM")
+		
+		krs2 = icicleRes
 		// filter the wire values if needed;
 		_wireValues := filter(wireValues, r1cs.CommitmentInfo.PrivateToPublic())
 
-		// krs_time := time.Now()
-		icicleRes, _, timings := MsmBN254GnarkAdapter(pk.G1.K, _wireValues[r1cs.GetNbPublicVariables():])
-		_, err := krs.MultiExp(pk.G1.K, _wireValues[r1cs.GetNbPublicVariables():], ecc.MultiExpConfig{NbTasks: n / 2})
-		log.Debug().Dur("took", timings[0]).Msg("Icicle API: MSM KRS Conv S")
-		log.Debug().Dur("took", timings[1]).Msg("Icicle API: MSM KRS Conv P")
-		log.Debug().Dur("took", timings[2]).Msg("Icicle API: MSM KRS MSM")
+		pointsBytes = len(pk.G1.K)*64
+		points_d, _ = goicicle.CudaMalloc(pointsBytes)
+		parsedPoints = icicle.BatchConvertFromG1Affine(pk.G1.K)
+		goicicle.CudaMemCpyHtoD[icicle.PointAffineNoInfinityBN254](points_d, parsedPoints, pointsBytes)
 		
-		if err != nil {
-			chKrsDone <- err
-			return
-		}
 
-		if krs.Equal(&icicleRes) {
-			log.Info().Msg("KRS MSM was correct")
-			krs = icicleRes
-		}
-
+		scals := _wireValues[r1cs.GetNbPublicVariables():]
+		scalarBytes := len(scals)*32
+		scalars_d, _ := goicicle.CudaMalloc(scalarBytes)
+		scalarsIcicle := icicle.BatchConvertFromFrGnark[icicle.ScalarField](scals)
+		goicicle.CudaMemCpyHtoD[icicle.ScalarField](scalars_d, scalarsIcicle, scalarBytes)
+		
+		icicleRes, _, _, time = MsmOnDevice(scalars_d, points_d, len(scals), true)
+		log.Debug().Dur("took", time).Msg("Icicle API: MSM KRS MSM")
+		
+		krs = icicleRes
 		krs.AddMixed(&deltas[2])
-		n := 3
-		for n != 0 {
-			select {
-			case err := <-chKrs2Done:
-				if err != nil {
-					chKrsDone <- err
-					return
-				}
-				krs.AddAssign(&krs2)
-			case err := <-chArDone:
-				if err != nil {
-					chKrsDone <- err
-					return
-				}
-				p1.ScalarMultiplication(&ar, &s)
-				krs.AddAssign(&p1)
-			case err := <-chBs1Done:
-				if err != nil {
-					chKrsDone <- err
-					return
-				}
-				p1.ScalarMultiplication(&bs1, &r)
-				krs.AddAssign(&p1)
-			}
-			n--
-		}
+		
+		krs.AddAssign(&krs2)
+
+		p1.ScalarMultiplication(&ar, &s)
+		krs.AddAssign(&p1)
+
+		p1.ScalarMultiplication(&bs1, &r)
+		krs.AddAssign(&p1)
 
 		proof.Krs.FromJacobian(&krs)
-		chKrsDone <- nil
 	}
 
 	computeBS2 := func() error {
@@ -331,15 +293,10 @@ func Prove(r1cs *cs.R1CS, pk *ProvingKey, fullWitness witness.Witness, opts ...b
 	<-chHDone
 
 	// schedule our proof part computations
-	go computeKRS()
-	go computeAR1()
-	go computeBS1()
+	computeBS1()
+	computeAR1()
+	computeKRS()
 	if err := computeBS2(); err != nil {
-		return nil, err
-	}
-
-	// wait for all parts of the proof to be computed.
-	if err := <-chKrsDone; err != nil {
 		return nil, err
 	}
 
@@ -371,7 +328,7 @@ func filter(slice []fr.Element, toRemove []int) (r []fr.Element) {
 	return r
 }
 
-func computeH(a, b, c []fr.Element, domain *fft.Domain) []fr.Element {
+func computeH(a, b, c []fr.Element, domain *fft.Domain) unsafe.Pointer {
 	// H part of Krs
 	// Compute H (hz=ab-c, where z=-2 on ker X^n+1 (z(x)=x^n-1))
 	// 	1 - _a = ifft(a), _b = ifft(b), _c = ifft(c)
@@ -467,95 +424,38 @@ func computeH(a, b, c []fr.Element, domain *fft.Domain) []fr.Element {
 
 	log.Debug().Dur("took", time.Since(convTime)).Msg("Icicle API: Conv and Copy a,b,c")
 	/*********** Copy a,b,c to Device End ************/
-
-	a_intt_d, timings_a := INttOnDevice(a_device, twiddles_inv_d, nil, n, sizeBytes, false)
-	log.Debug().Dur("took", timings_a[0]).Msg("Icicle API: INTT A Reverse")
-	log.Debug().Dur("took", timings_a[1]).Msg("Icicle API: INTT A Interp")
 	
-	b_intt_d, timings_b := INttOnDevice(b_device, twiddles_inv_d, nil, n, sizeBytes, false)
-	log.Debug().Dur("took", timings_b[0]).Msg("Icicle API: INTT B Reverse")
-	log.Debug().Dur("took", timings_b[1]).Msg("Icicle API: INTT B Interp")
+	computeInttNttDone := make(chan error, 1)
+	computeInttNttOnDevice := func (devicePointer unsafe.Pointer) {
+		a_intt_d, timings_a := INttOnDevice(devicePointer, twiddles_inv_d, nil, n, sizeBytes, false)
+		log.Debug().Dur("took", timings_a[0]).Msg("Icicle API: INTT Reverse")
+		log.Debug().Dur("took", timings_a[1]).Msg("Icicle API: INTT Interp")
+		
+		timing_a2 := NttOnDevice(devicePointer, a_intt_d, twiddles_d, cosetPowers_d, n, n, sizeBytes, true)
+		log.Debug().Dur("took", timing_a2[1]).Msg("Icicle API: NTT Coset Reverse")
+		log.Debug().Dur("took", timing_a2[0]).Msg("Icicle API: NTT Coset Eval")
 
-	c_intt_d, timings_c := INttOnDevice(c_device, twiddles_inv_d, nil, n, sizeBytes, false)
-	log.Debug().Dur("took", timings_c[0]).Msg("Icicle API: INTT C Reverse")
-	log.Debug().Dur("took", timings_c[1]).Msg("Icicle API: INTT C Interp")
+		computeInttNttDone <- nil
+	}
 
-
-	timing_a2 := NttOnDevice(a_device, a_intt_d, twiddles_d, cosetPowers_d, n, n, sizeBytes, true)
-	log.Debug().Dur("took", timing_a2[1]).Msg("Icicle API: NTT Coset A Reverse")
-	log.Debug().Dur("took", timing_a2[0]).Msg("Icicle API: NTT Coset A Eval")
-
-	timings_b2 := NttOnDevice(b_device, b_intt_d, twiddles_d, cosetPowers_d, n, n, sizeBytes, true)
-	log.Debug().Dur("took", timings_b2[1]).Msg("Icicle API: NTT Coset B Reverse")
-	log.Debug().Dur("took", timings_b2[0]).Msg("Icicle API: NTT Coset B Eval")
-
-	timings_c2 := NttOnDevice(c_device, c_intt_d, twiddles_d, cosetPowers_d, n, n, sizeBytes, true)
-	log.Debug().Dur("took", timings_c2[1]).Msg("Icicle API: NTT Coset C Reverse")
-	log.Debug().Dur("took", timings_c2[0]).Msg("Icicle API: NTT Coset C Eval")
+	computeInttNttTime := time.Now()
+	go computeInttNttOnDevice(a_device)
+	go computeInttNttOnDevice(b_device)
+	go computeInttNttOnDevice(c_device)
+	_, _, _ = <- computeInttNttDone, <- computeInttNttDone, <- computeInttNttDone
+	log.Debug().Dur("took", time.Since(computeInttNttTime)).Msg("Icicle API: INTT and NTT")
 
 	poltime := PolyOps(a_device, b_device, c_device, den_d, n)
 	log.Debug().Dur("took", poltime[0]).Msg("Icicle API: PolyOps Mul a b")
 	log.Debug().Dur("took", poltime[1]).Msg("Icicle API: PolyOps Sub a c")
 	log.Debug().Dur("took", poltime[2]).Msg("Icicle API: PolyOps Mul a den")
 
-	final, timings_final := INttOnDevice(a_device, twiddles_inv_d, cosetPowersInv_d, n, sizeBytes, true)
+	h, timings_final := INttOnDevice(a_device, twiddles_inv_d, cosetPowersInv_d, n, sizeBytes, true)
 	log.Debug().Dur("took", timings_final[0]).Msg("Icicle API: INTT Coset Reverse")
 	log.Debug().Dur("took", timings_final[1]).Msg("Icicle API: INTT Coset Interp")
 	
-	icicle.ReverseScalars(final, n)
-
-	a_host := make([]icicle.ScalarField, n)
-	goicicle.CudaMemCpyDtoH[icicle.ScalarField](a_host, final, sizeBytes)
-	threadedTime := time.Now()
-	a = icicle.BatchConvertToFrGnarkThreaded[icicle.ScalarField](a_host, 7)
-	log.Debug().Dur("took", time.Since(threadedTime)).Msg("Icicle API: Conv A Final")
+	icicle.ReverseScalars(h, n)
 	log.Debug().Dur("took", time.Since(computeHTime)).Msg("Icicle API: computeH")
 	
-	
-	// original
-	computeHTimeOrig := time.Now()
-	start_orig_api := time.Now()
-	domain.FFTInverse(aCopy, fft.DIF)
-	log.Debug().Dur("took", time.Since(start_orig_api)).Msg("Original API: INTT A")
-	start_orig_api = time.Now()
-	domain.FFTInverse(bCopy, fft.DIF)
-	log.Debug().Dur("took", time.Since(start_orig_api)).Msg("Original API: INTT B")
-	start_orig_api = time.Now()
-	domain.FFTInverse(cCopy, fft.DIF)
-	log.Debug().Dur("took", time.Since(start_orig_api)).Msg("Original API: INTT C")
-
-	start_orig_api = time.Now()
-	domain.FFT(aCopy, fft.DIT, fft.OnCoset())
-	log.Debug().Dur("took", time.Since(start_orig_api)).Msg("Original API: NTT Coset A")
-	start_orig_api = time.Now()
-	domain.FFT(bCopy, fft.DIT, fft.OnCoset())
-	log.Debug().Dur("took", time.Since(start_orig_api)).Msg("Original API: NTT Coset B")
-	start_orig_api = time.Now()
-	domain.FFT(cCopy, fft.DIT, fft.OnCoset())
-	log.Debug().Dur("took", time.Since(start_orig_api)).Msg("Original API: NTT Coset C")
-
-	var den, one fr.Element
-	one.SetOne()
-	den.Exp(domain.FrMultiplicativeGen, big.NewInt(int64(domain.Cardinality)))
-	den.Sub(&den, &one).Inverse(&den)
-
-	// h = ifft_coset(ca o cb - cc)
-	// reusing a to avoid unnecessary memory allocation
-	poly_ops := time.Now()
-	utils.Parallelize(n, func(start, end int) {
-		for i := start; i < end; i++ {
-			aCopy[i].Mul(&aCopy[i], &bCopy[i]).
-				Sub(&aCopy[i], &cCopy[i]).
-				Mul(&aCopy[i], &den)
-		}
-	})
-	log.Debug().Dur("took", time.Since(poly_ops)).Msg("Original API: PolyOps")
-
-	// ifft_coset
-	start_orig_api = time.Now()
-	domain.FFTInverse(aCopy, fft.DIF, fft.OnCoset())
-	log.Debug().Dur("took", time.Since(start_orig_api)).Msg("Original API: INTT Coset A")
-	log.Debug().Dur("took", time.Since(computeHTimeOrig)).Msg("Original API: computeH")
-	
-	return a
+	return h
 }
