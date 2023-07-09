@@ -30,4 +30,4 @@ require (
 	rsc.io/tmplfunc v0.0.3 // indirect
 )
 
-replace github.com/consensys/gnark-crypto => github.com/celer-network/gnark-crypto v0.0.0-20230316082432-b8844ef42f30
+replace github.com/consensys/gnark-crypto => ../gnark-crypto
