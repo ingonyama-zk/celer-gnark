@@ -33,7 +33,7 @@ import (
 	"time"
 	"unsafe"
 	icicle "github.com/ingonyama-zk/icicle/goicicle/curves/bn254"
-	goicicle "github.com/ingonyama-zk/icicle/goicicle"
+	device "github.com/ingonyama-zk/icicle/goicicle"
 )
 
 // Proof represents a Groth16 proof that was encoded with a ProvingKey and can be verified
@@ -169,16 +169,16 @@ func Prove(r1cs *cs.R1CS, pk *ProvingKey, fullWitness witness.Witness, opts ...b
 		<-chWireValuesB
 
 		pointsBytes := len(pk.G1.B)*64
-		points_d, _ := goicicle.CudaMalloc(pointsBytes)
+		points_d, _ := device.CudaMalloc(pointsBytes)
 		parsedPoints := icicle.BatchConvertFromG1Affine(pk.G1.B)
-		goicicle.CudaMemCpyHtoD[icicle.PointAffineNoInfinityBN254](points_d, parsedPoints, pointsBytes)
+		device.CudaMemCpyHtoD[icicle.PointAffineNoInfinityBN254](points_d, parsedPoints, pointsBytes)
 		
 
 		scals := wireValuesB
 		scalarBytes := len(scals)*32
-		scalars_d, _ := goicicle.CudaMalloc(scalarBytes)
+		scalars_d, _ := device.CudaMalloc(scalarBytes)
 		scalarsIcicle := icicle.BatchConvertFromFrGnark[icicle.ScalarField](scals)
-		goicicle.CudaMemCpyHtoD[icicle.ScalarField](scalars_d, scalarsIcicle, scalarBytes)
+		device.CudaMemCpyHtoD[icicle.ScalarField](scalars_d, scalarsIcicle, scalarBytes)
 		
 		icicleRes, _, _ := MsmOnDevice(scalars_d, points_d, len(scals), true)
 		
@@ -191,16 +191,16 @@ func Prove(r1cs *cs.R1CS, pk *ProvingKey, fullWitness witness.Witness, opts ...b
 		<-chWireValuesA
 
 		pointsBytes := len(pk.G1.A)*64
-		points_d, _ := goicicle.CudaMalloc(pointsBytes)
+		points_d, _ := device.CudaMalloc(pointsBytes)
 		parsedPoints := icicle.BatchConvertFromG1Affine(pk.G1.A)
-		goicicle.CudaMemCpyHtoD[icicle.PointAffineNoInfinityBN254](points_d, parsedPoints, pointsBytes)
+		device.CudaMemCpyHtoD[icicle.PointAffineNoInfinityBN254](points_d, parsedPoints, pointsBytes)
 		
 
 		scals := wireValuesA
 		scalarBytes := len(scals)*32
-		scalars_d, _ := goicicle.CudaMalloc(scalarBytes)
+		scalars_d, _ := device.CudaMalloc(scalarBytes)
 		scalarsIcicle := icicle.BatchConvertFromFrGnark[icicle.ScalarField](scals)
-		goicicle.CudaMemCpyHtoD[icicle.ScalarField](scalars_d, scalarsIcicle, scalarBytes)
+		device.CudaMemCpyHtoD[icicle.ScalarField](scalars_d, scalarsIcicle, scalarBytes)
 		
 		icicleRes, _, _ := MsmOnDevice(scalars_d, points_d, len(scals), true)
 		
@@ -218,9 +218,9 @@ func Prove(r1cs *cs.R1CS, pk *ProvingKey, fullWitness witness.Witness, opts ...b
 		sizeH := int(pk.Domain.Cardinality - 1) // comes from the fact the deg(H)=(n-1)+(n-1)-n=n-2
 		
 		pointsBytes := len(pk.G1.Z)*64
-		points_d, _ := goicicle.CudaMalloc(pointsBytes)
+		points_d, _ := device.CudaMalloc(pointsBytes)
 		parsedPoints := icicle.BatchConvertFromG1Affine(pk.G1.Z)
-		goicicle.CudaMemCpyHtoD[icicle.PointAffineNoInfinityBN254](points_d, parsedPoints, pointsBytes)
+		device.CudaMemCpyHtoD[icicle.PointAffineNoInfinityBN254](points_d, parsedPoints, pointsBytes)
 
 		icicleRes, _, _ := MsmOnDevice(h, points_d, sizeH, true)
 
@@ -230,16 +230,16 @@ func Prove(r1cs *cs.R1CS, pk *ProvingKey, fullWitness witness.Witness, opts ...b
 		_wireValues := filter(wireValues, r1cs.CommitmentInfo.PrivateToPublic())
 
 		pointsBytes = len(pk.G1.K)*64
-		points_d, _ = goicicle.CudaMalloc(pointsBytes)
+		points_d, _ = device.CudaMalloc(pointsBytes)
 		parsedPoints = icicle.BatchConvertFromG1Affine(pk.G1.K)
-		goicicle.CudaMemCpyHtoD[icicle.PointAffineNoInfinityBN254](points_d, parsedPoints, pointsBytes)
+		device.CudaMemCpyHtoD[icicle.PointAffineNoInfinityBN254](points_d, parsedPoints, pointsBytes)
 		
 
 		scals := _wireValues[r1cs.GetNbPublicVariables():]
 		scalarBytes := len(scals)*32
-		scalars_d, _ := goicicle.CudaMalloc(scalarBytes)
+		scalars_d, _ := device.CudaMalloc(scalarBytes)
 		scalarsIcicle := icicle.BatchConvertFromFrGnark[icicle.ScalarField](scals)
-		goicicle.CudaMemCpyHtoD[icicle.ScalarField](scalars_d, scalarsIcicle, scalarBytes)
+		device.CudaMemCpyHtoD[icicle.ScalarField](scalars_d, scalarsIcicle, scalarBytes)
 		
 		icicleRes, _, _ = MsmOnDevice(scalars_d, points_d, len(scals), true)
 		
@@ -365,15 +365,15 @@ func computeH(a, b, c []fr.Element, domain *fft.Domain) unsafe.Pointer {
 	log.Debug().Dur("took", time.Since(start_twid)).Msg("Icicle API: Twiddles")
 	
 	start_cosetPower_api := time.Now()
-	cosetPowers_d, _ := goicicle.CudaMalloc(sizeBytes)
+	cosetPowers_d, _ := device.CudaMalloc(sizeBytes)
 	cosetTable := icicle.BatchConvertFromFrGnark[icicle.ScalarField](domain.CosetTable)
-	goicicle.CudaMemCpyHtoD[icicle.ScalarField](cosetPowers_d, cosetTable, sizeBytes)
+	device.CudaMemCpyHtoD[icicle.ScalarField](cosetPowers_d, cosetTable, sizeBytes)
 	log.Debug().Dur("took", time.Since(start_cosetPower_api)).Msg("Icicle API: Copy Coset")
 
 	start_cosetPower_api = time.Now()
-	cosetPowersInv_d, _ := goicicle.CudaMalloc(sizeBytes)
+	cosetPowersInv_d, _ := device.CudaMalloc(sizeBytes)
 	cosetTableInv := icicle.BatchConvertFromFrGnark[icicle.ScalarField](domain.CosetTableInv)
-	goicicle.CudaMemCpyHtoD[icicle.ScalarField](cosetPowersInv_d, cosetTableInv, sizeBytes)
+	device.CudaMemCpyHtoD[icicle.ScalarField](cosetPowersInv_d, cosetTableInv, sizeBytes)
 	log.Debug().Dur("took", time.Since(start_cosetPower_api)).Msg("Icicle API: Copy Coset Inv")
 
 	var denI, oneI fr.Element
@@ -381,7 +381,7 @@ func computeH(a, b, c []fr.Element, domain *fft.Domain) unsafe.Pointer {
 	denI.Exp(domain.FrMultiplicativeGen, big.NewInt(int64(domain.Cardinality)))
 	denI.Sub(&denI, &oneI).Inverse(&denI)
 
-	den_d, _ := goicicle.CudaMalloc(sizeBytes)
+	den_d, _ := device.CudaMalloc(sizeBytes)
 	log2Size := int(math.Floor(math.Log2(float64(n))))
 	denIcicle := *icicle.NewFieldFromFrGnark[icicle.ScalarField](denI)
 	denIcicleArr := []icicle.ScalarField{denIcicle}
@@ -392,7 +392,7 @@ func computeH(a, b, c []fr.Element, domain *fft.Domain) unsafe.Pointer {
 		denIcicleArr = append(denIcicleArr, denIcicle)
 	}
 
-	goicicle.CudaMemCpyHtoD[icicle.ScalarField](den_d, denIcicleArr, sizeBytes)
+	device.CudaMemCpyHtoD[icicle.ScalarField](den_d, denIcicleArr, sizeBytes)
 
 	/*********** END SETUP **********/
 
@@ -401,9 +401,9 @@ func computeH(a, b, c []fr.Element, domain *fft.Domain) unsafe.Pointer {
 	copyBDone := make(chan unsafe.Pointer, 1)
 	copyCDone := make(chan unsafe.Pointer, 1)
 	copyToDevice := func (scalars []fr.Element, copyDone chan unsafe.Pointer) {
-		a_device, _ := goicicle.CudaMalloc(sizeBytes)
+		a_device, _ := device.CudaMalloc(sizeBytes)
 		scalarsIcicleA := icicle.BatchConvertFromFrGnarkThreaded[icicle.ScalarField](scalars, 7)
-		goicicle.CudaMemCpyHtoD[icicle.ScalarField](a_device, scalarsIcicleA, sizeBytes)
+		device.CudaMemCpyHtoD[icicle.ScalarField](a_device, scalarsIcicleA, sizeBytes)
 
 		copyDone <- a_device
 	}
