@@ -180,8 +180,7 @@ func Prove(r1cs *cs.R1CS, pk *ProvingKey, fullWitness witness.Witness, opts ...b
 		scalarsIcicle := icicle.BatchConvertFromFrGnark[icicle.ScalarField](scals)
 		goicicle.CudaMemCpyHtoD[icicle.ScalarField](scalars_d, scalarsIcicle, scalarBytes)
 		
-		icicleRes, _, _, time := MsmOnDevice(scalars_d, points_d, len(scals), true)
-		log.Debug().Dur("took", time).Msg("Icicle API: MSM BS1 MSM")
+		icicleRes, _, _ := MsmOnDevice(scalars_d, points_d, len(scals), true)
 		
 		bs1 = icicleRes
 		bs1.AddMixed(&pk.G1.Beta)
@@ -203,8 +202,7 @@ func Prove(r1cs *cs.R1CS, pk *ProvingKey, fullWitness witness.Witness, opts ...b
 		scalarsIcicle := icicle.BatchConvertFromFrGnark[icicle.ScalarField](scals)
 		goicicle.CudaMemCpyHtoD[icicle.ScalarField](scalars_d, scalarsIcicle, scalarBytes)
 		
-		icicleRes, _, _, time := MsmOnDevice(scalars_d, points_d, len(scals), true)
-		log.Debug().Dur("took", time).Msg("Icicle API: MSM AR1 MSM")
+		icicleRes, _, _ := MsmOnDevice(scalars_d, points_d, len(scals), true)
 		
 		ar = icicleRes
 		ar.AddMixed(&pk.G1.Alpha)
@@ -224,9 +222,8 @@ func Prove(r1cs *cs.R1CS, pk *ProvingKey, fullWitness witness.Witness, opts ...b
 		parsedPoints := icicle.BatchConvertFromG1Affine(pk.G1.Z)
 		goicicle.CudaMemCpyHtoD[icicle.PointAffineNoInfinityBN254](points_d, parsedPoints, pointsBytes)
 
-		icicleRes, _, _, time := MsmOnDevice(h, points_d, sizeH, true)
+		icicleRes, _, _ := MsmOnDevice(h, points_d, sizeH, true)
 
-		log.Debug().Dur("took", time).Msg("Icicle API: MSM KRS2 MSM")
 		
 		krs2 = icicleRes
 		// filter the wire values if needed;
@@ -244,8 +241,7 @@ func Prove(r1cs *cs.R1CS, pk *ProvingKey, fullWitness witness.Witness, opts ...b
 		scalarsIcicle := icicle.BatchConvertFromFrGnark[icicle.ScalarField](scals)
 		goicicle.CudaMemCpyHtoD[icicle.ScalarField](scalars_d, scalarsIcicle, scalarBytes)
 		
-		icicleRes, _, _, time = MsmOnDevice(scalars_d, points_d, len(scals), true)
-		log.Debug().Dur("took", time).Msg("Icicle API: MSM KRS MSM")
+		icicleRes, _, _ = MsmOnDevice(scalars_d, points_d, len(scals), true)
 		
 		krs = icicleRes
 		krs.AddMixed(&deltas[2])
@@ -401,7 +397,6 @@ func computeH(a, b, c []fr.Element, domain *fft.Domain) unsafe.Pointer {
 	/*********** END SETUP **********/
 
 	/*********** Copy a,b,c to Device Start ************/
-	computeHTime := time.Now()
 	copyADone := make(chan unsafe.Pointer, 1)
 	copyBDone := make(chan unsafe.Pointer, 1)
 	copyCDone := make(chan unsafe.Pointer, 1)
@@ -427,35 +422,22 @@ func computeH(a, b, c []fr.Element, domain *fft.Domain) unsafe.Pointer {
 	
 	computeInttNttDone := make(chan error, 1)
 	computeInttNttOnDevice := func (devicePointer unsafe.Pointer) {
-		a_intt_d, timings_a := INttOnDevice(devicePointer, twiddles_inv_d, nil, n, sizeBytes, false)
-		log.Debug().Dur("took", timings_a[0]).Msg("Icicle API: INTT Reverse")
-		log.Debug().Dur("took", timings_a[1]).Msg("Icicle API: INTT Interp")
-		
-		timing_a2 := NttOnDevice(devicePointer, a_intt_d, twiddles_d, cosetPowers_d, n, n, sizeBytes, true)
-		log.Debug().Dur("took", timing_a2[1]).Msg("Icicle API: NTT Coset Reverse")
-		log.Debug().Dur("took", timing_a2[0]).Msg("Icicle API: NTT Coset Eval")
+		a_intt_d := INttOnDevice(devicePointer, twiddles_inv_d, nil, n, sizeBytes, false)
+		NttOnDevice(devicePointer, a_intt_d, twiddles_d, cosetPowers_d, n, n, sizeBytes, true)
 
 		computeInttNttDone <- nil
 	}
 
-	computeInttNttTime := time.Now()
 	go computeInttNttOnDevice(a_device)
 	go computeInttNttOnDevice(b_device)
 	go computeInttNttOnDevice(c_device)
 	_, _, _ = <- computeInttNttDone, <- computeInttNttDone, <- computeInttNttDone
-	log.Debug().Dur("took", time.Since(computeInttNttTime)).Msg("Icicle API: INTT and NTT")
 
-	poltime := PolyOps(a_device, b_device, c_device, den_d, n)
-	log.Debug().Dur("took", poltime[0]).Msg("Icicle API: PolyOps Mul a b")
-	log.Debug().Dur("took", poltime[1]).Msg("Icicle API: PolyOps Sub a c")
-	log.Debug().Dur("took", poltime[2]).Msg("Icicle API: PolyOps Mul a den")
+	PolyOps(a_device, b_device, c_device, den_d, n)
 
-	h, timings_final := INttOnDevice(a_device, twiddles_inv_d, cosetPowersInv_d, n, sizeBytes, true)
-	log.Debug().Dur("took", timings_final[0]).Msg("Icicle API: INTT Coset Reverse")
-	log.Debug().Dur("took", timings_final[1]).Msg("Icicle API: INTT Coset Interp")
+	h := INttOnDevice(a_device, twiddles_inv_d, cosetPowersInv_d, n, sizeBytes, true)
 	
 	icicle.ReverseScalars(h, n)
-	log.Debug().Dur("took", time.Since(computeHTime)).Msg("Icicle API: computeH")
 	
 	return h
 }

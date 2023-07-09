@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"runtime"
 	"sync"
-	"time"
 	"unsafe"
 
 	curve "github.com/consensys/gnark-crypto/ecc/bn254"
@@ -110,78 +109,46 @@ func NttBN254GnarkAdapter(domain *fft.Domain, coset bool, scalars []fr.Element, 
 	return icicle.BatchConvertToFrGnark[icicle.ScalarField](nttResult)
 }
 
-func INttOnDevice(scalars_d, twiddles_d, cosetPowers_d unsafe.Pointer, size, sizeBytes int, isCoset bool) (unsafe.Pointer, []time.Duration) {
-	var timings []time.Duration	
-	revTime := time.Now()
+func INttOnDevice(scalars_d, twiddles_d, cosetPowers_d unsafe.Pointer, size, sizeBytes int, isCoset bool) unsafe.Pointer {
 	icicle.ReverseScalars(scalars_d, size)
-	revTimeElapsed := time.Since(revTime)
-	timings = append(timings, revTimeElapsed)
 
-	interpTime := time.Now()
 	scalarsInterp := icicle.Interpolate(scalars_d, twiddles_d, cosetPowers_d, size, isCoset)
-	interpTimeElapsed := time.Since(interpTime)
-	timings = append(timings, interpTimeElapsed)
 
-	return scalarsInterp, timings
+	return scalarsInterp
 }
 
-func NttOnDevice(scalars_out, scalars_d, twiddles_d, coset_powers_d unsafe.Pointer, size, twid_size, size_bytes int, isCoset bool) []time.Duration {
-	var timings []time.Duration
-	evalTime := time.Now()
-	res := icicle.Evaluate(scalars_out, scalars_d, twiddles_d, coset_powers_d, size, twid_size, isCoset)
-	evalTimeElapsed := time.Since(evalTime)
-	timings = append(timings, evalTimeElapsed)
+func NttOnDevice(scalars_out, scalars_d, twiddles_d, coset_powers_d unsafe.Pointer, size, twid_size, size_bytes int, isCoset bool) {
 
+	res := icicle.Evaluate(scalars_out, scalars_d, twiddles_d, coset_powers_d, size, twid_size, isCoset)
 	if res != 0 {
 		fmt.Print("Issue evaluating")
 	}
-
-	revTime := time.Now()
 	icicle.ReverseScalars(scalars_out, size)
-	revTimeElapsed := time.Since(revTime)
-	timings = append(timings, revTimeElapsed)
-
-	return timings
 }
 
-func MsmBN254GnarkAdapter(points []curve.G1Affine, scalars []fr.Element) (curve.G1Jac, error, []time.Duration) {
-	var timings []time.Duration
+func MsmBN254GnarkAdapter(points []curve.G1Affine, scalars []fr.Element) (curve.G1Jac, error) {
 	out := new(icicle.PointBN254)
 
-	convSTime := time.Now()
 	parsedScalars := icicle.BatchConvertFromFrGnark[icicle.ScalarField](scalars)
-	timings = append(timings, time.Since(convSTime))
-
-	convPTime := time.Now()
 	parsedPoints := icicle.BatchConvertFromG1Affine(points)
-	timings = append(timings, time.Since(convPTime))
-
-	msmTime := time.Now()
 	_, err := icicle.MsmBN254(out, parsedPoints, parsedScalars, 0)
-	timings = append(timings, time.Since(msmTime))
 
-	return *out.ToGnarkJac(), err, timings
+	return *out.ToGnarkJac(), err
 }
 
 
-func PolyOps(a_d, b_d, c_d, den_d unsafe.Pointer, size int) (timings []time.Duration) {
-	convSTime := time.Now()
+func PolyOps(a_d, b_d, c_d, den_d unsafe.Pointer, size int) {
 	ret := icicle.VecScalarMulMod(a_d, b_d, size)
-	timings = append(timings, time.Since(convSTime))
 
 	if ret != 0 {
 		fmt.Print("Vector mult a*b issue")
 	}
-	convSTime = time.Now()
 	ret = icicle.VecScalarSub(a_d, c_d, size)
-	timings = append(timings, time.Since(convSTime))
 
 	if ret != 0 {
 		fmt.Print("Vector sub issue")
 	}
-	convSTime = time.Now()
 	ret = icicle.VecScalarMulMod(a_d, den_d, size)
-	timings = append(timings, time.Since(convSTime))
 
 	if ret != 0 {
 		fmt.Print("Vector mult a*den issue")
@@ -190,19 +157,17 @@ func PolyOps(a_d, b_d, c_d, den_d unsafe.Pointer, size int) (timings []time.Dura
 	return
 }
 
-func MsmOnDevice(scalars_d, points_d unsafe.Pointer, count int, convert bool) (curve.G1Jac, unsafe.Pointer, error, time.Duration) {
+func MsmOnDevice(scalars_d, points_d unsafe.Pointer, count int, convert bool) (curve.G1Jac, unsafe.Pointer, error) {
 	out_d, _ := cudawrapper.CudaMalloc(96)
 
-	msmTime := time.Now()
 	icicle.Commit(out_d, scalars_d, points_d, count)
-	timings := time.Since(msmTime)
 
 	if convert {
 		outHost := make([]icicle.PointBN254, 1)
 		cudawrapper.CudaMemCpyDtoH[icicle.PointBN254](outHost, out_d, 96)
-		return *outHost[0].ToGnarkJac(), nil, nil, timings
+		return *outHost[0].ToGnarkJac(), nil, nil
 	}
 
-	return curve.G1Jac{}, out_d, nil, timings
+	return curve.G1Jac{}, out_d, nil
 
 }
