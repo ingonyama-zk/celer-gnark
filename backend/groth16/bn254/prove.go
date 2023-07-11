@@ -407,9 +407,11 @@ func computeH(a, b, c []fr.Element, domain *fft.Domain) unsafe.Pointer {
 	copyCDone := make(chan unsafe.Pointer, 1)
 	copyToDevice := func (scalars []fr.Element, copyDone chan unsafe.Pointer) {
 		a_device, _ := goicicle.CudaMalloc(sizeBytes)
-		scalarsIcicleA := icicle.BatchConvertFromFrGnarkThreaded[icicle.ScalarField](scalars, 7)
-		goicicle.CudaMemCpyHtoD[icicle.ScalarField](a_device, scalarsIcicleA, sizeBytes)
-
+		//(*C.BN254_scalar_t)
+		//scalarsIcicleA := icicle.BatchConvertFromFrGnarkMontThreaded[icicle.ScalarField](scalars, 7)
+		goicicle.CudaMemCpyHtoD[fr.Element](a_device, scalars, sizeBytes)
+		//icicle.FromMontgomery(a_device, len(scalarsIcicleA))
+		MontConvOnDevice(a_device, len(scalars), false)
 		copyDone <- a_device
 	}
 
