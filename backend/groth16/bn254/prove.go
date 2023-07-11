@@ -18,11 +18,9 @@ package groth16
 
 import (
 	"fmt"
-	"math"
 	"github.com/consensys/gnark-crypto/ecc"
 	curve "github.com/consensys/gnark-crypto/ecc/bn254"
 	"github.com/consensys/gnark-crypto/ecc/bn254/fr"
-	"github.com/consensys/gnark-crypto/ecc/bn254/fr/fft"
 	"github.com/consensys/gnark/backend"
 	"github.com/consensys/gnark/backend/witness"
 	"github.com/consensys/gnark/constraint/bn254"
@@ -109,7 +107,7 @@ func Prove(r1cs *cs.R1CS, pk *ProvingKey, fullWitness witness.Witness, opts ...b
 	var h unsafe.Pointer
 	chHDone := make(chan struct{}, 1)
 	go func() {
-		h = computeH(solution.A, solution.B, solution.C, &pk.Domain)
+		h = computeH(solution.A, solution.B, solution.C, pk)
 		solution.A = nil
 		solution.B = nil
 		solution.C = nil
@@ -168,19 +166,13 @@ func Prove(r1cs *cs.R1CS, pk *ProvingKey, fullWitness witness.Witness, opts ...b
 	computeBS1 := func() {
 		<-chWireValuesB
 
-		pointsBytes := len(pk.G1.B)*64
-		points_d, _ := device.CudaMalloc(pointsBytes)
-		parsedPoints := icicle.BatchConvertFromG1Affine(pk.G1.B)
-		device.CudaMemCpyHtoD[icicle.PointAffineNoInfinityBN254](points_d, parsedPoints, pointsBytes)
-		
-
 		scals := wireValuesB
 		scalarBytes := len(scals)*32
 		scalars_d, _ := device.CudaMalloc(scalarBytes)
-		scalarsIcicle := icicle.BatchConvertFromFrGnark[icicle.ScalarField](scals)
+		scalarsIcicle := icicle.BatchConvertFromFrGnarkThreaded[icicle.ScalarField](scals, 7)
 		device.CudaMemCpyHtoD[icicle.ScalarField](scalars_d, scalarsIcicle, scalarBytes)
 		
-		icicleRes, _, _ := MsmOnDevice(scalars_d, points_d, len(scals), true)
+		icicleRes, _, _ := MsmOnDevice(scalars_d, pk.G1Device.B, len(scals), true)
 		
 		bs1 = icicleRes
 		bs1.AddMixed(&pk.G1.Beta)
@@ -190,19 +182,13 @@ func Prove(r1cs *cs.R1CS, pk *ProvingKey, fullWitness witness.Witness, opts ...b
 	computeAR1 := func() {
 		<-chWireValuesA
 
-		pointsBytes := len(pk.G1.A)*64
-		points_d, _ := device.CudaMalloc(pointsBytes)
-		parsedPoints := icicle.BatchConvertFromG1Affine(pk.G1.A)
-		device.CudaMemCpyHtoD[icicle.PointAffineNoInfinityBN254](points_d, parsedPoints, pointsBytes)
-		
-
 		scals := wireValuesA
 		scalarBytes := len(scals)*32
 		scalars_d, _ := device.CudaMalloc(scalarBytes)
-		scalarsIcicle := icicle.BatchConvertFromFrGnark[icicle.ScalarField](scals)
+		scalarsIcicle := icicle.BatchConvertFromFrGnarkThreaded[icicle.ScalarField](scals, 7)
 		device.CudaMemCpyHtoD[icicle.ScalarField](scalars_d, scalarsIcicle, scalarBytes)
 		
-		icicleRes, _, _ := MsmOnDevice(scalars_d, points_d, len(scals), true)
+		icicleRes, _, _ := MsmOnDevice(scalars_d, pk.G1Device.A, len(scals), true)
 		
 		ar = icicleRes
 		ar.AddMixed(&pk.G1.Alpha)
@@ -216,32 +202,20 @@ func Prove(r1cs *cs.R1CS, pk *ProvingKey, fullWitness witness.Witness, opts ...b
 
 		var krs, krs2, p1 curve.G1Jac
 		sizeH := int(pk.Domain.Cardinality - 1) // comes from the fact the deg(H)=(n-1)+(n-1)-n=n-2
-		
-		pointsBytes := len(pk.G1.Z)*64
-		points_d, _ := device.CudaMalloc(pointsBytes)
-		parsedPoints := icicle.BatchConvertFromG1Affine(pk.G1.Z)
-		device.CudaMemCpyHtoD[icicle.PointAffineNoInfinityBN254](points_d, parsedPoints, pointsBytes)
 
-		icicleRes, _, _ := MsmOnDevice(h, points_d, sizeH, true)
-
+		icicleRes, _, _ := MsmOnDevice(h, pk.G1Device.Z, sizeH, true)
 		
 		krs2 = icicleRes
 		// filter the wire values if needed;
 		_wireValues := filter(wireValues, r1cs.CommitmentInfo.PrivateToPublic())
 
-		pointsBytes = len(pk.G1.K)*64
-		points_d, _ = device.CudaMalloc(pointsBytes)
-		parsedPoints = icicle.BatchConvertFromG1Affine(pk.G1.K)
-		device.CudaMemCpyHtoD[icicle.PointAffineNoInfinityBN254](points_d, parsedPoints, pointsBytes)
-		
-
 		scals := _wireValues[r1cs.GetNbPublicVariables():]
 		scalarBytes := len(scals)*32
 		scalars_d, _ := device.CudaMalloc(scalarBytes)
-		scalarsIcicle := icicle.BatchConvertFromFrGnark[icicle.ScalarField](scals)
+		scalarsIcicle := icicle.BatchConvertFromFrGnarkThreaded[icicle.ScalarField](scals, 7)
 		device.CudaMemCpyHtoD[icicle.ScalarField](scalars_d, scalarsIcicle, scalarBytes)
 		
-		icicleRes, _, _ = MsmOnDevice(scalars_d, points_d, len(scals), true)
+		icicleRes, _, _ = MsmOnDevice(scalars_d, pk.G1Device.K, len(scals), true)
 		
 		krs = icicleRes
 		krs.AddMixed(&deltas[2])
@@ -324,7 +298,15 @@ func filter(slice []fr.Element, toRemove []int) (r []fr.Element) {
 	return r
 }
 
-func computeH(a, b, c []fr.Element, domain *fft.Domain) unsafe.Pointer {
+func copyToDevice(scalars []fr.Element, bytes int, copyDone chan unsafe.Pointer) {
+	devicePtr, _ := device.CudaMalloc(bytes)
+	scalarsIcicleA := icicle.BatchConvertFromFrGnarkThreaded[icicle.ScalarField](scalars, 7)
+	device.CudaMemCpyHtoD[icicle.ScalarField](devicePtr, scalarsIcicleA, bytes)
+
+	copyDone <- devicePtr
+}
+
+func computeH(a, b, c []fr.Element, pk *ProvingKey) unsafe.Pointer {
 	// H part of Krs
 	// Compute H (hz=ab-c, where z=-2 on ker X^n+1 (z(x)=x^n-1))
 	// 	1 - _a = ifft(a), _b = ifft(b), _c = ifft(c)
@@ -334,7 +316,7 @@ func computeH(a, b, c []fr.Element, domain *fft.Domain) unsafe.Pointer {
 	n := len(a)
 
 	// add padding to ensure input length is domain cardinality
-	padding := make([]fr.Element, int(domain.Cardinality)-n)
+	padding := make([]fr.Element, int(pk.Domain.Cardinality)-n)
 	a = append(a, padding...)
 	b = append(b, padding...)
 	c = append(c, padding...)
@@ -350,68 +332,15 @@ func computeH(a, b, c []fr.Element, domain *fft.Domain) unsafe.Pointer {
 	
 	log := logger.Logger()
 
-	/*********** BEGIN SETUP **********/
-	om_selector := int(math.Log(float64(n)) / math.Log(2))
-	start_twid := time.Now()
-	twiddles_inv_d, twddles_err := icicle.GenerateTwiddles(n, om_selector, true)
-	log.Debug().Dur("took", time.Since(start_twid)).Msg("Icicle API: Twiddles Inv")
-
-	if twddles_err != nil {
-		fmt.Print(twddles_err)
-	}
-
-	start_twid = time.Now()
-	twiddles_d, twddles_err := icicle.GenerateTwiddles(n, om_selector, false)
-	log.Debug().Dur("took", time.Since(start_twid)).Msg("Icicle API: Twiddles")
-	
-	start_cosetPower_api := time.Now()
-	cosetPowers_d, _ := device.CudaMalloc(sizeBytes)
-	cosetTable := icicle.BatchConvertFromFrGnark[icicle.ScalarField](domain.CosetTable)
-	device.CudaMemCpyHtoD[icicle.ScalarField](cosetPowers_d, cosetTable, sizeBytes)
-	log.Debug().Dur("took", time.Since(start_cosetPower_api)).Msg("Icicle API: Copy Coset")
-
-	start_cosetPower_api = time.Now()
-	cosetPowersInv_d, _ := device.CudaMalloc(sizeBytes)
-	cosetTableInv := icicle.BatchConvertFromFrGnark[icicle.ScalarField](domain.CosetTableInv)
-	device.CudaMemCpyHtoD[icicle.ScalarField](cosetPowersInv_d, cosetTableInv, sizeBytes)
-	log.Debug().Dur("took", time.Since(start_cosetPower_api)).Msg("Icicle API: Copy Coset Inv")
-
-	var denI, oneI fr.Element
-	oneI.SetOne()
-	denI.Exp(domain.FrMultiplicativeGen, big.NewInt(int64(domain.Cardinality)))
-	denI.Sub(&denI, &oneI).Inverse(&denI)
-
-	den_d, _ := device.CudaMalloc(sizeBytes)
-	log2Size := int(math.Floor(math.Log2(float64(n))))
-	denIcicle := *icicle.NewFieldFromFrGnark[icicle.ScalarField](denI)
-	denIcicleArr := []icicle.ScalarField{denIcicle}
-	for i := 0; i < log2Size; i++ {
-		denIcicleArr = append(denIcicleArr, denIcicleArr...)
-	}
-	for i := 0; i < (n - int(math.Pow(2, float64(log2Size)))); i++ {
-		denIcicleArr = append(denIcicleArr, denIcicle)
-	}
-
-	device.CudaMemCpyHtoD[icicle.ScalarField](den_d, denIcicleArr, sizeBytes)
-
-	/*********** END SETUP **********/
-
 	/*********** Copy a,b,c to Device Start ************/
 	copyADone := make(chan unsafe.Pointer, 1)
 	copyBDone := make(chan unsafe.Pointer, 1)
 	copyCDone := make(chan unsafe.Pointer, 1)
-	copyToDevice := func (scalars []fr.Element, copyDone chan unsafe.Pointer) {
-		a_device, _ := device.CudaMalloc(sizeBytes)
-		scalarsIcicleA := icicle.BatchConvertFromFrGnarkThreaded[icicle.ScalarField](scalars, 7)
-		device.CudaMemCpyHtoD[icicle.ScalarField](a_device, scalarsIcicleA, sizeBytes)
-
-		copyDone <- a_device
-	}
 
 	convTime := time.Now()
-	go copyToDevice(a, copyADone)
-	go copyToDevice(b, copyBDone)
-	go copyToDevice(c, copyCDone)
+	go copyToDevice(a, sizeBytes, copyADone)
+	go copyToDevice(b, sizeBytes, copyBDone)
+	go copyToDevice(c, sizeBytes, copyCDone)
 
 	a_device := <- copyADone
 	b_device := <- copyBDone
@@ -422,8 +351,8 @@ func computeH(a, b, c []fr.Element, domain *fft.Domain) unsafe.Pointer {
 	
 	computeInttNttDone := make(chan error, 1)
 	computeInttNttOnDevice := func (devicePointer unsafe.Pointer) {
-		a_intt_d := INttOnDevice(devicePointer, twiddles_inv_d, nil, n, sizeBytes, false)
-		NttOnDevice(devicePointer, a_intt_d, twiddles_d, cosetPowers_d, n, n, sizeBytes, true)
+		a_intt_d := INttOnDevice(devicePointer, pk.DomainDevice.TwiddlesInv, nil, n, sizeBytes, false)
+		NttOnDevice(devicePointer, a_intt_d, pk.DomainDevice.Twiddles, pk.DomainDevice.CosetTable, n, n, sizeBytes, true)
 
 		computeInttNttDone <- nil
 	}
@@ -433,9 +362,9 @@ func computeH(a, b, c []fr.Element, domain *fft.Domain) unsafe.Pointer {
 	go computeInttNttOnDevice(c_device)
 	_, _, _ = <- computeInttNttDone, <- computeInttNttDone, <- computeInttNttDone
 
-	PolyOps(a_device, b_device, c_device, den_d, n)
+	PolyOps(a_device, b_device, c_device, pk.DenDevice, n)
 
-	h := INttOnDevice(a_device, twiddles_inv_d, cosetPowersInv_d, n, sizeBytes, true)
+	h := INttOnDevice(a_device, pk.DomainDevice.TwiddlesInv, pk.DomainDevice.CosetTableInv, n, sizeBytes, true)
 	
 	icicle.ReverseScalars(h, n)
 	
