@@ -6,6 +6,7 @@ import (
 
 	curve "github.com/consensys/gnark-crypto/ecc/bn254"
 	device "github.com/ingonyama-zk/icicle/goicicle"
+	goicicle "github.com/ingonyama-zk/icicle/goicicle"
 	icicle "github.com/ingonyama-zk/icicle/goicicle/curves/bn254"
 )
 
@@ -57,4 +58,18 @@ func MsmOnDevice(scalars_d, points_d unsafe.Pointer, count int, convert bool) (c
 
 	return curve.G1Jac{}, out_d, nil
 
+}
+
+func MsmG2OnDevice(scalars_d, points_d unsafe.Pointer, count int, convert bool) (curve.G2Jac, unsafe.Pointer, error) {
+	out_d, _ := goicicle.CudaMalloc(192)
+
+	icicle.Commit(out_d, scalars_d, points_d, count)
+
+	if convert {
+		outHost := make([]icicle.G2Point, 1)
+		device.CudaMemCpyDtoH[icicle.G2Point](outHost, out_d, 192)
+		return *outHost[0].ToGnarkJac(), nil, nil
+	}
+
+	return curve.G2Jac{}, out_d, nil
 }

@@ -33,5 +33,5 @@ require (
 
 replace (
 	github.com/consensys/gnark-crypto => github.com/celer-network/gnark-crypto v0.0.0-20230316082432-b8844ef42f30
-	github.com/ingonyama-zk/icicle/goicicle v0.0.0 => /storage/users/jeremy/icicle/goicicle
+	github.com/ingonyama-zk/icicle/goicicle v0.0.0 => /home/miner/monia/icicle/goicicle
 )

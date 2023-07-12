@@ -244,6 +244,14 @@ func Prove(r1cs *cs.R1CS, pk *ProvingKey, fullWitness witness.Witness, opts ...b
 
 		bsg2_time := time.Now()
 		_, err := Bs.MultiExp(pk.G2.B, wireValuesB, ecc.MultiExpConfig{NbTasks: nbTasks})
+
+		scals := wireValuesB
+		scalarBytes := len(scals)*32
+		scalars_d, _ := device.CudaMalloc(scalarBytes)
+		scalarsIcicle := icicle.BatchConvertFromFrGnarkThreaded[icicle.ScalarField](scals, 7)
+		device.CudaMemCpyHtoD[icicle.ScalarField](scalars_d, scalarsIcicle, scalarBytes)
+
+		icicleG2Res, _, _  = MsmG2OnDevice(pk.G2Device.B, scalars_d, len(scals), true)
 		log.Debug().Dur("took", time.Since(bsg2_time)).Msg("Original API: MSM G2 BS")
 		
 		if err != nil {
