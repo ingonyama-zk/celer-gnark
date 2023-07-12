@@ -177,8 +177,10 @@ func Prove(r1cs *cs.R1CS, pk *ProvingKey, fullWitness witness.Witness, opts ...b
 		scals := wireValuesB
 		scalarBytes := len(scals)*32
 		scalars_d, _ := goicicle.CudaMalloc(scalarBytes)
-		scalarsIcicle := icicle.BatchConvertFromFrGnark[icicle.ScalarField](scals)
-		goicicle.CudaMemCpyHtoD[icicle.ScalarField](scalars_d, scalarsIcicle, scalarBytes)
+		// scalarsIcicle := icicle.BatchConvertFromFrGnark[icicle.ScalarField](scals)
+		// goicicle.CudaMemCpyHtoD[icicle.ScalarField](scalars_d, scalarsIcicle, scalarBytes)
+		goicicle.CudaMemCpyHtoD[fr.Element](scalars_d, scals, scalarBytes)
+		MontConvOnDevice(scalars_d, len(scals), false)
 		
 		icicleRes, _, _, time := MsmOnDevice(scalars_d, points_d, len(scals), true)
 		log.Debug().Dur("took", time).Msg("Icicle API: MSM BS1 MSM")
@@ -200,8 +202,10 @@ func Prove(r1cs *cs.R1CS, pk *ProvingKey, fullWitness witness.Witness, opts ...b
 		scals := wireValuesA
 		scalarBytes := len(scals)*32
 		scalars_d, _ := goicicle.CudaMalloc(scalarBytes)
-		scalarsIcicle := icicle.BatchConvertFromFrGnark[icicle.ScalarField](scals)
-		goicicle.CudaMemCpyHtoD[icicle.ScalarField](scalars_d, scalarsIcicle, scalarBytes)
+		// scalarsIcicle := icicle.BatchConvertFromFrGnark[icicle.ScalarField](scals)
+		// goicicle.CudaMemCpyHtoD[icicle.ScalarField](scalars_d, scalarsIcicle, scalarBytes)
+		goicicle.CudaMemCpyHtoD[fr.Element](scalars_d, scals, scalarBytes)
+		MontConvOnDevice(scalars_d, len(scals), false)
 		
 		icicleRes, _, _, time := MsmOnDevice(scalars_d, points_d, len(scals), true)
 		log.Debug().Dur("took", time).Msg("Icicle API: MSM AR1 MSM")
@@ -241,8 +245,10 @@ func Prove(r1cs *cs.R1CS, pk *ProvingKey, fullWitness witness.Witness, opts ...b
 		scals := _wireValues[r1cs.GetNbPublicVariables():]
 		scalarBytes := len(scals)*32
 		scalars_d, _ := goicicle.CudaMalloc(scalarBytes)
-		scalarsIcicle := icicle.BatchConvertFromFrGnark[icicle.ScalarField](scals)
-		goicicle.CudaMemCpyHtoD[icicle.ScalarField](scalars_d, scalarsIcicle, scalarBytes)
+		// scalarsIcicle := icicle.BatchConvertFromFrGnark[icicle.ScalarField](scals)
+		// goicicle.CudaMemCpyHtoD[icicle.ScalarField](scalars_d, scalarsIcicle, scalarBytes)
+		goicicle.CudaMemCpyHtoD[fr.Element](scalars_d, scals, scalarBytes)
+		MontConvOnDevice(scalars_d, len(scals), false)
 		
 		icicleRes, _, _, time = MsmOnDevice(scalars_d, points_d, len(scals), true)
 		log.Debug().Dur("took", time).Msg("Icicle API: MSM KRS MSM")
@@ -370,14 +376,20 @@ func computeH(a, b, c []fr.Element, domain *fft.Domain) unsafe.Pointer {
 	
 	start_cosetPower_api := time.Now()
 	cosetPowers_d, _ := goicicle.CudaMalloc(sizeBytes)
-	cosetTable := icicle.BatchConvertFromFrGnark[icicle.ScalarField](domain.CosetTable)
-	goicicle.CudaMemCpyHtoD[icicle.ScalarField](cosetPowers_d, cosetTable, sizeBytes)
+	// cosetTable := icicle.BatchConvertFromFrGnark[icicle.ScalarField](domain.CosetTable)
+	// goicicle.CudaMemCpyHtoD[icicle.ScalarField](cosetPowers_d, cosetTable, sizeBytes)
+	goicicle.CudaMemCpyHtoD[fr.Element](cosetPowers_d, domain.CosetTable, sizeBytes)
+	MontConvOnDevice(cosetPowers_d, len(domain.CosetTable), false)
+
 	log.Debug().Dur("took", time.Since(start_cosetPower_api)).Msg("Icicle API: Copy Coset")
 
 	start_cosetPower_api = time.Now()
 	cosetPowersInv_d, _ := goicicle.CudaMalloc(sizeBytes)
-	cosetTableInv := icicle.BatchConvertFromFrGnark[icicle.ScalarField](domain.CosetTableInv)
-	goicicle.CudaMemCpyHtoD[icicle.ScalarField](cosetPowersInv_d, cosetTableInv, sizeBytes)
+	// cosetTableInv := icicle.BatchConvertFromFrGnark[icicle.ScalarField](domain.CosetTableInv)
+	// goicicle.CudaMemCpyHtoD[icicle.ScalarField](cosetPowersInv_d, cosetTableInv, sizeBytes)
+	goicicle.CudaMemCpyHtoD[fr.Element](cosetPowersInv_d, domain.CosetTableInv, sizeBytes)
+	MontConvOnDevice(cosetPowersInv_d, len(domain.CosetTable), false)
+
 	log.Debug().Dur("took", time.Since(start_cosetPower_api)).Msg("Icicle API: Copy Coset Inv")
 
 	var denI, oneI fr.Element
@@ -407,10 +419,8 @@ func computeH(a, b, c []fr.Element, domain *fft.Domain) unsafe.Pointer {
 	copyCDone := make(chan unsafe.Pointer, 1)
 	copyToDevice := func (scalars []fr.Element, copyDone chan unsafe.Pointer) {
 		a_device, _ := goicicle.CudaMalloc(sizeBytes)
-		//(*C.BN254_scalar_t)
-		//scalarsIcicleA := icicle.BatchConvertFromFrGnarkMontThreaded[icicle.ScalarField](scalars, 7)
 		goicicle.CudaMemCpyHtoD[fr.Element](a_device, scalars, sizeBytes)
-		//icicle.FromMontgomery(a_device, len(scalarsIcicleA))
+		//icicle.FromMontgomery(a_device, len(scalars))
 		MontConvOnDevice(a_device, len(scalars), false)
 		copyDone <- a_device
 	}

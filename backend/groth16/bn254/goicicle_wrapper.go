@@ -86,7 +86,7 @@ func NttBN254GnarkAdapter(domain *fft.Domain, coset bool, scalars []fr.Element, 
 	}
 
 	nttResult := icicle.BatchConvertFromFrGnark[icicle.ScalarField](scalars)
-	icicle.NttBN254(&nttResult, isInverse, decimation, deviceId)
+	icicle.NttBN254(&nttResult, isInverse, decimation, deviceId) //TODO: remove these legacy NTT APIs
 
 	if coset && isInverse {
 		res := icicle.BatchConvertToFrGnark[icicle.ScalarField](nttResult)
