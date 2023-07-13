@@ -425,14 +425,15 @@ func (pk *ProvingKey) setupDevicePointers() {
 	/*************************  End G1 Device Setup  ***************************/
 
 	/*************************  Start G2 Device Setup  ***************************/
-	// pointsBytesB2 := len(pk.G2.B) * fp.Bytes * 2
-	// b2_d, _ := goicicle.CudaMalloc(pointsBytesB2)
-	// iciclePointsB2 := icicle.BatchConvertFromG2Affine(pk.G2.B)
-	// goicicle.CudaMemCpyHtoD[](b2_d, iciclePointsB2, pointsBytesB2)
-	// pk.G2Device.B = b2_d
+	pointsBytesB2 := len(pk.G2.B) * fp.Bytes * 2
+	b2_d, _ := goicicle.CudaMalloc(pointsBytesB2)
+	iciclePointsB2 := icicle.BatchConvertFromG2Affine(pk.G2.B)
+	goicicle.CudaMemCpyHtoD[icicle.G2PointAffine](b2_d, iciclePointsB2, pointsBytesB2)
+	pk.G2Device.B = b2_d
 	/*************************  End G2 Device Setup  ***************************/
 
 }
+
 // Precompute sets e, -[δ]2, -[γ]2
 // This is meant to be called internally during setup or deserialization.
 func (vk *VerifyingKey) Precompute() error {

@@ -18,6 +18,11 @@ package groth16
 
 import (
 	"fmt"
+	"math/big"
+	"runtime"
+	"time"
+	"unsafe"
+
 	"github.com/consensys/gnark-crypto/ecc"
 	curve "github.com/consensys/gnark-crypto/ecc/bn254"
 	"github.com/consensys/gnark-crypto/ecc/bn254/fr"
@@ -26,12 +31,8 @@ import (
 	"github.com/consensys/gnark/constraint/bn254"
 	"github.com/consensys/gnark/constraint/solver"
 	"github.com/consensys/gnark/logger"
-	"math/big"
-	"runtime"
-	"time"
-	"unsafe"
-	icicle "github.com/ingonyama-zk/icicle/goicicle/curves/bn254"
 	device "github.com/ingonyama-zk/icicle/goicicle"
+	icicle "github.com/ingonyama-zk/icicle/goicicle/curves/bn254"
 )
 
 // Proof represents a Groth16 proof that was encoded with a ProvingKey and can be verified
@@ -243,21 +244,20 @@ func Prove(r1cs *cs.R1CS, pk *ProvingKey, fullWitness witness.Witness, opts ...b
 		<-chWireValuesB
 
 		bsg2_time := time.Now()
-		_, err := Bs.MultiExp(pk.G2.B, wireValuesB, ecc.MultiExpConfig{NbTasks: nbTasks})
-
 		scals := wireValuesB
 		scalarBytes := len(scals)*32
 		scalars_d, _ := device.CudaMalloc(scalarBytes)
 		scalarsIcicle := icicle.BatchConvertFromFrGnarkThreaded[icicle.ScalarField](scals, 7)
 		device.CudaMemCpyHtoD[icicle.ScalarField](scalars_d, scalarsIcicle, scalarBytes)
 
-		icicleG2Res, _, _  = MsmG2OnDevice(pk.G2Device.B, scalars_d, len(scals), true)
+		icicleG2Res, _, _  := MsmG2OnDevice(pk.G2Device.B, scalars_d, len(scals), true)
 		log.Debug().Dur("took", time.Since(bsg2_time)).Msg("Original API: MSM G2 BS")
 		
 		if err != nil {
 			return err
 		}
 
+		Bs = icicleG2Res
 		deltaS.FromAffine(&pk.G2.Delta)
 		deltaS.ScalarMultiplication(&deltaS, &s)
 		Bs.AddAssign(&deltaS)
