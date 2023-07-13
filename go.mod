@@ -1,14 +1,15 @@
 module github.com/consensys/gnark
 
-go 1.18
+go 1.19
 
 require (
+	github.com/bits-and-blooms/bitset v1.5.0
 	github.com/blang/semver/v4 v4.0.0
 	github.com/consensys/bavard v0.1.13
 	github.com/consensys/gnark-crypto v0.11.0
 	github.com/fxamacker/cbor/v2 v2.4.0
 	github.com/google/go-cmp v0.5.9
-	github.com/google/pprof v0.0.0-20230207041349-798e818bf904
+	github.com/google/pprof v0.0.0-20230309165930-d61513b1440d
 	github.com/ingonyama-zk/icicle/goicicle v0.0.0
 	github.com/leanovate/gopter v0.2.9
 	github.com/rs/zerolog v1.29.0
@@ -32,6 +33,6 @@ require (
 )
 
 replace (
-	github.com/consensys/gnark-crypto => github.com/celer-network/gnark-crypto v0.0.0-20230316082432-b8844ef42f30
+	github.com/consensys/gnark-crypto => github.com/celer-network/gnark-crypto v0.0.0-20230423085214-c00cabca6125
 	github.com/ingonyama-zk/icicle/goicicle v0.0.0 => /storage/users/jeremy/icicle/goicicle
 )
