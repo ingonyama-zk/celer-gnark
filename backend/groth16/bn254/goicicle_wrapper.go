@@ -17,8 +17,15 @@ func INttOnDevice(scalars_d, twiddles_d, cosetPowers_d unsafe.Pointer, size, siz
 	return scalarsInterp
 }
 
-func NttOnDevice(scalars_out, scalars_d, twiddles_d, coset_powers_d unsafe.Pointer, size, twid_size, size_bytes int, isCoset bool) {
+func MontConvOnDevice(scalars_d unsafe.Pointer, size int, is_into bool) {
+	if is_into {
+		icicle.ToMontgomery(scalars_d, size)
+	} else {
+		icicle.FromMontgomery(scalars_d, size)
+	}
+}
 
+func NttOnDevice(scalars_out, scalars_d, twiddles_d, coset_powers_d unsafe.Pointer, size, twid_size, size_bytes int, isCoset bool) {
 	res := icicle.Evaluate(scalars_out, scalars_d, twiddles_d, coset_powers_d, size, twid_size, isCoset)
 	if res != 0 {
 		fmt.Print("Issue evaluating")

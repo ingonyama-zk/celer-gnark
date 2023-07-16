@@ -169,8 +169,8 @@ func Prove(r1cs *cs.R1CS, pk *ProvingKey, fullWitness witness.Witness, opts ...b
 		scals := wireValuesB
 		scalarBytes := len(scals)*32
 		scalars_d, _ := device.CudaMalloc(scalarBytes)
-		scalarsIcicle := icicle.BatchConvertFromFrGnarkThreaded[icicle.ScalarField](scals, 7)
-		device.CudaMemCpyHtoD[icicle.ScalarField](scalars_d, scalarsIcicle, scalarBytes)
+		device.CudaMemCpyHtoD[fr.Element](scalars_d, scals, scalarBytes)
+		MontConvOnDevice(scalars_d, len(scals), false)
 		
 		icicleRes, _, _ := MsmOnDevice(scalars_d, pk.G1Device.B, len(scals), true)
 		
@@ -185,8 +185,8 @@ func Prove(r1cs *cs.R1CS, pk *ProvingKey, fullWitness witness.Witness, opts ...b
 		scals := wireValuesA
 		scalarBytes := len(scals)*32
 		scalars_d, _ := device.CudaMalloc(scalarBytes)
-		scalarsIcicle := icicle.BatchConvertFromFrGnarkThreaded[icicle.ScalarField](scals, 7)
-		device.CudaMemCpyHtoD[icicle.ScalarField](scalars_d, scalarsIcicle, scalarBytes)
+		device.CudaMemCpyHtoD[fr.Element](scalars_d, scals, scalarBytes)
+		MontConvOnDevice(scalars_d, len(scals), false)
 		
 		icicleRes, _, _ := MsmOnDevice(scalars_d, pk.G1Device.A, len(scals), true)
 		
@@ -212,8 +212,8 @@ func Prove(r1cs *cs.R1CS, pk *ProvingKey, fullWitness witness.Witness, opts ...b
 		scals := _wireValues[r1cs.GetNbPublicVariables():]
 		scalarBytes := len(scals)*32
 		scalars_d, _ := device.CudaMalloc(scalarBytes)
-		scalarsIcicle := icicle.BatchConvertFromFrGnarkThreaded[icicle.ScalarField](scals, 7)
-		device.CudaMemCpyHtoD[icicle.ScalarField](scalars_d, scalarsIcicle, scalarBytes)
+		device.CudaMemCpyHtoD[fr.Element](scalars_d, scals, scalarBytes)
+		MontConvOnDevice(scalars_d, len(scals), false)
 		
 		icicleRes, _, _ = MsmOnDevice(scalars_d, pk.G1Device.K, len(scals), true)
 		
@@ -300,8 +300,8 @@ func filter(slice []fr.Element, toRemove []int) (r []fr.Element) {
 
 func copyToDevice(scalars []fr.Element, bytes int, copyDone chan unsafe.Pointer) {
 	devicePtr, _ := device.CudaMalloc(bytes)
-	scalarsIcicleA := icicle.BatchConvertFromFrGnarkThreaded[icicle.ScalarField](scalars, 7)
-	device.CudaMemCpyHtoD[icicle.ScalarField](devicePtr, scalarsIcicleA, bytes)
+	device.CudaMemCpyHtoD[fr.Element](devicePtr, scalars, bytes)
+	MontConvOnDevice(devicePtr, len(scalars), false)
 
 	copyDone <- devicePtr
 }
@@ -322,22 +322,13 @@ func computeH(a, b, c []fr.Element, pk *ProvingKey) unsafe.Pointer {
 	c = append(c, padding...)
 	n = len(a)
 
-	aCopy := make([]fr.Element, n)
-	copy(aCopy, a)
-	bCopy := make([]fr.Element, n)
-	copy(bCopy, b)
-	cCopy := make([]fr.Element, n)
-	copy(cCopy, c)
 	sizeBytes := n * fr.Bytes
-	
-	log := logger.Logger()
 
 	/*********** Copy a,b,c to Device Start ************/
 	copyADone := make(chan unsafe.Pointer, 1)
 	copyBDone := make(chan unsafe.Pointer, 1)
 	copyCDone := make(chan unsafe.Pointer, 1)
 
-	convTime := time.Now()
 	go copyToDevice(a, sizeBytes, copyADone)
 	go copyToDevice(b, sizeBytes, copyBDone)
 	go copyToDevice(c, sizeBytes, copyCDone)
@@ -345,8 +336,6 @@ func computeH(a, b, c []fr.Element, pk *ProvingKey) unsafe.Pointer {
 	a_device := <- copyADone
 	b_device := <- copyBDone
 	c_device := <- copyCDone
-
-	log.Debug().Dur("took", time.Since(convTime)).Msg("Icicle API: Conv and Copy a,b,c")
 	/*********** Copy a,b,c to Device End ************/
 	
 	computeInttNttDone := make(chan error, 1)

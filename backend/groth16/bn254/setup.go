@@ -339,15 +339,15 @@ func (pk *ProvingKey) setupDevicePointers() {
 	
 	/*************************     CosetTableInv      ***************************/
 	cosetPowersInv_d, _ := goicicle.CudaMalloc(sizeBytes)
-	cosetTableInv := icicle.BatchConvertFromFrGnark[icicle.ScalarField](pk.Domain.CosetTableInv)
-	goicicle.CudaMemCpyHtoD[icicle.ScalarField](cosetPowersInv_d, cosetTableInv, sizeBytes)
+	goicicle.CudaMemCpyHtoD[fr.Element](cosetPowersInv_d, pk.Domain.CosetTableInv, sizeBytes)
+	MontConvOnDevice(cosetPowersInv_d, len(pk.Domain.CosetTable), false)
 
 	pk.DomainDevice.CosetTableInv = cosetPowersInv_d
 	
 	/*************************     CosetTable      ***************************/
 	cosetPowers_d, _ := goicicle.CudaMalloc(sizeBytes)
-	cosetTable := icicle.BatchConvertFromFrGnark[icicle.ScalarField](pk.Domain.CosetTable)
-	goicicle.CudaMemCpyHtoD[icicle.ScalarField](cosetPowers_d, cosetTable, sizeBytes)
+	goicicle.CudaMemCpyHtoD[fr.Element](cosetPowers_d, pk.Domain.CosetTable, sizeBytes)
+	MontConvOnDevice(cosetPowers_d, len(pk.Domain.CosetTable), false)
 
 	pk.DomainDevice.CosetTable = cosetPowers_d
 
