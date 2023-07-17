@@ -27,7 +27,6 @@ import (
 	"github.com/consensys/gnark/constraint/solver"
 	"github.com/consensys/gnark/logger"
 	"math/big"
-	"runtime"
 	"time"
 	"unsafe"
 	icicle "github.com/ingonyama-zk/icicle/goicicle/curves/bn254"
@@ -116,11 +115,11 @@ func Prove(r1cs *cs.R1CS, pk *ProvingKey, fullWitness witness.Witness, opts ...b
 
 	// we need to copy and filter the wireValues for each multi exp
 	// as pk.G1.A, pk.G1.B and pk.G2.B may have (a significant) number of point at infinity
-	var wireValuesA, wireValuesB []fr.Element
+	var wireValuesADevice, wireValuesBDevice OnDeviceData
 	chWireValuesA, chWireValuesB := make(chan struct{}, 1), make(chan struct{}, 1)
 
 	go func() {
-		wireValuesA = make([]fr.Element, len(wireValues)-int(pk.NbInfinityA))
+		wireValuesA := make([]fr.Element, len(wireValues)-int(pk.NbInfinityA))
 		for i, j := 0, 0; j < len(wireValuesA); i++ {
 			if pk.InfinityA[i] {
 				continue
@@ -128,10 +127,18 @@ func Prove(r1cs *cs.R1CS, pk *ProvingKey, fullWitness witness.Witness, opts ...b
 			wireValuesA[j] = wireValues[i]
 			j++
 		}
+
+		wireValuesASize := len(wireValuesA)
+		scalarBytes := wireValuesASize*fr.Bytes
+		wireValuesADevicePtr, _ := goicicle.CudaMalloc(scalarBytes)
+		goicicle.CudaMemCpyHtoD[fr.Element](wireValuesADevicePtr, wireValuesA, scalarBytes)
+		MontConvOnDevice(wireValuesADevicePtr, wireValuesASize, false)
+		wireValuesADevice = OnDeviceData{wireValuesADevicePtr, wireValuesASize}
+
 		close(chWireValuesA)
 	}()
 	go func() {
-		wireValuesB = make([]fr.Element, len(wireValues)-int(pk.NbInfinityB))
+		wireValuesB := make([]fr.Element, len(wireValues)-int(pk.NbInfinityB))
 		for i, j := 0, 0; j < len(wireValuesB); i++ {
 			if pk.InfinityB[i] {
 				continue
@@ -139,6 +146,14 @@ func Prove(r1cs *cs.R1CS, pk *ProvingKey, fullWitness witness.Witness, opts ...b
 			wireValuesB[j] = wireValues[i]
 			j++
 		}
+
+		wireValuesBSize := len(wireValuesB)
+		scalarBytes := wireValuesBSize*fr.Bytes
+		wireValuesBDevicePtr, _ := goicicle.CudaMalloc(scalarBytes)
+		goicicle.CudaMemCpyHtoD[fr.Element](wireValuesBDevicePtr, wireValuesB, scalarBytes)
+		MontConvOnDevice(wireValuesBDevicePtr, wireValuesBSize, false)
+		wireValuesBDevice = OnDeviceData{wireValuesBDevicePtr, wireValuesBSize}
+
 		close(chWireValuesB)
 	}()
 
@@ -161,18 +176,10 @@ func Prove(r1cs *cs.R1CS, pk *ProvingKey, fullWitness witness.Witness, opts ...b
 
 	var bs1, ar curve.G1Jac
 
-	n := runtime.NumCPU()
-
 	computeBS1 := func() {
 		<-chWireValuesB
-
-		scals := wireValuesB
-		scalarBytes := len(scals)*32
-		scalars_d, _ := goicicle.CudaMalloc(scalarBytes)
-		goicicle.CudaMemCpyHtoD[fr.Element](scalars_d, scals, scalarBytes)
-		MontConvOnDevice(scalars_d, len(scals), false)
 		
-		icicleRes, _, _, time := MsmOnDevice(scalars_d, pk.G1Device.B, len(scals), true)
+		icicleRes, _, _, time := MsmOnDevice(wireValuesBDevice.p, pk.G1Device.B, wireValuesBDevice.size, true)
 		log.Debug().Dur("took", time).Msg("Icicle API: MSM BS1 MSM")
 		
 		bs1 = icicleRes
@@ -182,14 +189,8 @@ func Prove(r1cs *cs.R1CS, pk *ProvingKey, fullWitness witness.Witness, opts ...b
 
 	computeAR1 := func() {
 		<-chWireValuesA
-
-		scals := wireValuesA
-		scalarBytes := len(scals)*32
-		scalars_d, _ := goicicle.CudaMalloc(scalarBytes)
-		goicicle.CudaMemCpyHtoD[fr.Element](scalars_d, scals, scalarBytes)
-		MontConvOnDevice(scalars_d, len(scals), false)
 		
-		icicleRes, _, _, time := MsmOnDevice(scalars_d, pk.G1Device.A, len(scals), true)
+		icicleRes, _, _, time := MsmOnDevice(wireValuesADevice.p, pk.G1Device.A, wireValuesADevice.size, true)
 		log.Debug().Dur("took", time).Msg("Icicle API: MSM AR1 MSM")
 		
 		ar = icicleRes
@@ -240,20 +241,9 @@ func Prove(r1cs *cs.R1CS, pk *ProvingKey, fullWitness witness.Witness, opts ...b
 		// Bs2 (1 multi exp G2 - size = len(wires))
 		var Bs, deltaS curve.G2Jac
 
-		nbTasks := n
-		if nbTasks <= 16 {
-			// if we don't have a lot of CPUs, this may artificially split the MSM
-			nbTasks *= 2
-		}
 		<-chWireValuesB
 
-		scals := wireValuesB
-		scalarBytes := len(scals)*fr.Bytes
-		scalars_d, _ := goicicle.CudaMalloc(scalarBytes)
-		goicicle.CudaMemCpyHtoD[fr.Element](scalars_d, scals, scalarBytes)
-		MontConvOnDevice(scalars_d, len(scals), false)
-
-		icicleG2Res, _, _, timing  := MsmG2OnDevice(scalars_d, pk.G2Device.B, len(scals), true)
+		icicleG2Res, _, _, timing  := MsmG2OnDevice(wireValuesBDevice.p, pk.G2Device.B, wireValuesBDevice.size, true)
 		log.Debug().Dur("took", timing).Msg("Icicle API: MSM G2 BS")
 		
 		if err != nil {
@@ -311,14 +301,6 @@ func filter(slice []fr.Element, toRemove []int) (r []fr.Element) {
 	return r
 }
 
-func copyToDevice(scalars []fr.Element, bytes int, copyDone chan unsafe.Pointer) {
-	devicePtr, _ := goicicle.CudaMalloc(bytes)
-	goicicle.CudaMemCpyHtoD[fr.Element](devicePtr, scalars, bytes)
-	MontConvOnDevice(devicePtr, len(scalars), false)
-
-	copyDone <- devicePtr
-}
-
 func computeH(a, b, c []fr.Element, pk *ProvingKey) unsafe.Pointer {
 	// H part of Krs
 	// Compute H (hz=ab-c, where z=-2 on ker X^n+1 (z(x)=x^n-1))
@@ -335,12 +317,6 @@ func computeH(a, b, c []fr.Element, pk *ProvingKey) unsafe.Pointer {
 	c = append(c, padding...)
 	n = len(a)
 
-	aCopy := make([]fr.Element, n)
-	copy(aCopy, a)
-	bCopy := make([]fr.Element, n)
-	copy(bCopy, b)
-	cCopy := make([]fr.Element, n)
-	copy(cCopy, c)
 	sizeBytes := n * fr.Bytes
 	
 	log := logger.Logger()
@@ -352,9 +328,9 @@ func computeH(a, b, c []fr.Element, pk *ProvingKey) unsafe.Pointer {
 	copyCDone := make(chan unsafe.Pointer, 1)
 
 	convTime := time.Now()
-	go copyToDevice(a, sizeBytes, copyADone)
-	go copyToDevice(b, sizeBytes, copyBDone)
-	go copyToDevice(c, sizeBytes, copyCDone)
+	go CopyToDevice(a, sizeBytes, copyADone)
+	go CopyToDevice(b, sizeBytes, copyBDone)
+	go CopyToDevice(c, sizeBytes, copyCDone)
 
 	a_device := <- copyADone
 	b_device := <- copyBDone

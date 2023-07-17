@@ -14,6 +14,11 @@ import (
 	icicle "github.com/ingonyama-zk/icicle/goicicle/curves/bn254"
 )
 
+type OnDeviceData struct {
+	p unsafe.Pointer
+	size int
+}
+
 // Execute process in parallel the work function
 func Execute(nbIterations int, work func(int, int), maxCpus ...int) {
 
@@ -230,9 +235,16 @@ func MsmG2OnDevice(scalars_d, points_d unsafe.Pointer, count int, convert bool) 
 	if convert {
 		outHost := make([]icicle.G2Point, 1)
 		cudawrapper.CudaMemCpyDtoH[icicle.G2Point](outHost, out_d, 192)
-		fmt.Println("outHost After: ", outHost[0])
 		return *outHost[0].ToGnarkJac(), nil, nil, timings
 	}
 
 	return curve.G2Jac{}, out_d, nil, timings
+}
+
+func CopyToDevice(scalars []fr.Element, bytes int, copyDone chan unsafe.Pointer) {
+	devicePtr, _ := cudawrapper.CudaMalloc(bytes)
+	cudawrapper.CudaMemCpyHtoD[fr.Element](devicePtr, scalars, bytes)
+	MontConvOnDevice(devicePtr, len(scalars), false)
+
+	copyDone <- devicePtr
 }
