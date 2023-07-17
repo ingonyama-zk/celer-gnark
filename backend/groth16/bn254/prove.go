@@ -247,14 +247,20 @@ func Prove(r1cs *cs.R1CS, pk *ProvingKey, fullWitness witness.Witness, opts ...b
 		}
 		<-chWireValuesB
 
-		bsg2_time := time.Now()
-		_, err := Bs.MultiExp(pk.G2.B, wireValuesB, ecc.MultiExpConfig{NbTasks: nbTasks})
-		log.Debug().Dur("took", time.Since(bsg2_time)).Msg("Original API: MSM G2 BS")
+		scals := wireValuesB
+		scalarBytes := len(scals)*fr.Bytes
+		scalars_d, _ := goicicle.CudaMalloc(scalarBytes)
+		goicicle.CudaMemCpyHtoD[fr.Element](scalars_d, scals, scalarBytes)
+		MontConvOnDevice(scalars_d, len(scals), false)
+
+		icicleG2Res, _, _, timing  := MsmG2OnDevice(scalars_d, pk.G2Device.B, len(scals), true)
+		log.Debug().Dur("took", timing).Msg("Icicle API: MSM G2 BS")
 		
 		if err != nil {
 			return err
 		}
 
+		Bs = icicleG2Res
 		deltaS.FromAffine(&pk.G2.Delta)
 		deltaS.ScalarMultiplication(&deltaS, &s)
 		Bs.AddAssign(&deltaS)

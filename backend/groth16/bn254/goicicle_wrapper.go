@@ -218,5 +218,21 @@ func MsmOnDevice(scalars_d, points_d unsafe.Pointer, count int, convert bool) (c
 	}
 
 	return curve.G1Jac{}, out_d, nil, timings
+}
 
+func MsmG2OnDevice(scalars_d, points_d unsafe.Pointer, count int, convert bool) (curve.G2Jac, unsafe.Pointer, error, time.Duration) {
+	out_d, _ := cudawrapper.CudaMalloc(192)
+	
+	msmTime := time.Now()
+	icicle.CommitG2(out_d, scalars_d, points_d, count)
+	timings := time.Since(msmTime)
+	
+	if convert {
+		outHost := make([]icicle.G2Point, 1)
+		cudawrapper.CudaMemCpyDtoH[icicle.G2Point](outHost, out_d, 192)
+		fmt.Println("outHost After: ", outHost[0])
+		return *outHost[0].ToGnarkJac(), nil, nil, timings
+	}
+
+	return curve.G2Jac{}, out_d, nil, timings
 }

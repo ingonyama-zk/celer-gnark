@@ -24,9 +24,9 @@ import (
 	"fmt"
 
 	"github.com/consensys/gnark-crypto/ecc"
-	"github.com/consensys/gnark-crypto/ecc/bls24-317/fp"
 	curve "github.com/consensys/gnark-crypto/ecc/bn254"
 	"github.com/consensys/gnark-crypto/ecc/bn254/fr"
+	"github.com/consensys/gnark-crypto/ecc/bn254/fp"
 	"github.com/consensys/gnark-crypto/ecc/bn254/fr/fft"
 	"github.com/consensys/gnark-crypto/ecc/bn254/fr/pedersen"
 	"github.com/consensys/gnark/constraint"
@@ -424,11 +424,11 @@ func (pk *ProvingKey) setupDevicePointers() {
 	/*************************  End G1 Device Setup  ***************************/
 
 	/*************************  Start G2 Device Setup  ***************************/
-	// pointsBytesB2 := len(pk.G2.B) * fp.Bytes * 2
-	// b2_d, _ := goicicle.CudaMalloc(pointsBytesB2)
-	// iciclePointsB2 := icicle.BatchConvertFromG2Affine(pk.G2.B)
-	// goicicle.CudaMemCpyHtoD[](b2_d, iciclePointsB2, pointsBytesB2)
-	// pk.G2Device.B = b2_d
+	pointsBytesB2 := len(pk.G2.B) * fp.Bytes * 4
+	b2_d, _ := goicicle.CudaMalloc(pointsBytesB2)
+	iciclePointsB2 := icicle.BatchConvertFromG2Affine(pk.G2.B)
+	goicicle.CudaMemCpyHtoD[icicle.G2PointAffine](b2_d, iciclePointsB2, pointsBytesB2)
+	pk.G2Device.B = b2_d
 	/*************************  End G2 Device Setup  ***************************/
 
 }
