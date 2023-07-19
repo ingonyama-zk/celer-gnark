@@ -209,11 +209,11 @@ func PolyOps(a_d, b_d, c_d, den_d unsafe.Pointer, size int) (timings []time.Dura
 	return
 }
 
-func MsmOnDevice(scalars_d, points_d unsafe.Pointer, count int, convert bool) (curve.G1Jac, unsafe.Pointer, error, time.Duration) {
+func MsmOnDevice(scalars_d, points_d unsafe.Pointer, count, bucketFactor int, convert bool) (curve.G1Jac, unsafe.Pointer, error, time.Duration) {
 	out_d, _ := cudawrapper.CudaMalloc(96)
 
 	msmTime := time.Now()
-	icicle.Commit(out_d, scalars_d, points_d, count)
+	icicle.Commit(out_d, scalars_d, points_d, count, bucketFactor)
 	timings := time.Since(msmTime)
 
 	if convert {
@@ -225,11 +225,11 @@ func MsmOnDevice(scalars_d, points_d unsafe.Pointer, count int, convert bool) (c
 	return curve.G1Jac{}, out_d, nil, timings
 }
 
-func MsmG2OnDevice(scalars_d, points_d unsafe.Pointer, count int, convert bool) (curve.G2Jac, unsafe.Pointer, error, time.Duration) {
+func MsmG2OnDevice(scalars_d, points_d unsafe.Pointer, count, bucketFactor int, convert bool) (curve.G2Jac, unsafe.Pointer, error, time.Duration) {
 	out_d, _ := cudawrapper.CudaMalloc(192)
 	
 	msmTime := time.Now()
-	icicle.CommitG2(out_d, scalars_d, points_d, count)
+	icicle.CommitG2(out_d, scalars_d, points_d, count, bucketFactor)
 	timings := time.Since(msmTime)
 	
 	if convert {
