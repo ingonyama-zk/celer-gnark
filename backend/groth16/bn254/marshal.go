@@ -19,7 +19,6 @@ package groth16
 import (
 	"encoding/json"
 	"io"
-	"io/ioutil"
 
 	curve "github.com/consensys/gnark-crypto/ecc/bn254"
 )
@@ -137,12 +136,6 @@ func (vk *VerifyingKey) writeTo(w io.Writer, raw bool) (int64, error) {
 	if err := enc.Encode(&vk.CommitmentKey.GRootSigmaNeg); err != nil {
 		return enc.BytesWritten(), err
 	}
-	if err := enc.Encode(vk.CommitmentKey.Basis); err != nil {
-		return enc.BytesWritten(), err
-	}
-	if err := enc.Encode(vk.CommitmentKey.BasisExpSigma); err != nil {
-		return enc.BytesWritten(), err
-	}
 
 	b, err := json.Marshal(vk.CommitmentInfo)
 	if err != nil {
@@ -205,14 +198,8 @@ func (vk *VerifyingKey) readFrom(r io.Reader, decOptions ...func(*curve.Decoder)
 	if err := dec.Decode(&vk.CommitmentKey.GRootSigmaNeg); err != nil {
 		return dec.BytesRead(), err
 	}
-	if err := dec.Decode(&vk.CommitmentKey.Basis); err != nil {
-		return dec.BytesRead(), err
-	}
-	if err := dec.Decode(&vk.CommitmentKey.BasisExpSigma); err != nil {
-		return dec.BytesRead(), err
-	}
 
-	b, err := ioutil.ReadAll(r)
+	b, err := io.ReadAll(r)
 	if err != nil {
 		return dec.BytesRead(), err
 	}
@@ -273,8 +260,6 @@ func (pk *ProvingKey) writeTo(w io.Writer, raw bool) (int64, error) {
 		pk.NbInfinityB,
 		pk.InfinityA,
 		pk.InfinityB,
-		&pk.CommitmentKey.G,
-		&pk.CommitmentKey.GRootSigmaNeg,
 		pk.CommitmentKey.Basis,
 		pk.CommitmentKey.BasisExpSigma,
 	}
@@ -343,12 +328,6 @@ func (pk *ProvingKey) readFrom(r io.Reader, decOptions ...func(*curve.Decoder)) 
 		return n + dec.BytesRead(), err
 	}
 
-	if err := dec.Decode(&pk.CommitmentKey.G); err != nil {
-		return dec.BytesRead(), err
-	}
-	if err := dec.Decode(&pk.CommitmentKey.GRootSigmaNeg); err != nil {
-		return dec.BytesRead(), err
-	}
 	if err := dec.Decode(&pk.CommitmentKey.Basis); err != nil {
 		return dec.BytesRead(), err
 	}

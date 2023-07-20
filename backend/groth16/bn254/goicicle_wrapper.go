@@ -5,9 +5,15 @@ import (
 	"unsafe"
 
 	curve "github.com/consensys/gnark-crypto/ecc/bn254"
+	"github.com/consensys/gnark-crypto/ecc/bn254/fr"
 	device "github.com/ingonyama-zk/icicle/goicicle"
 	icicle "github.com/ingonyama-zk/icicle/goicicle/curves/bn254"
 )
+
+type OnDeviceData struct {
+	p unsafe.Pointer
+	size int
+}
 
 func INttOnDevice(scalars_d, twiddles_d, cosetPowers_d unsafe.Pointer, size, sizeBytes int, isCoset bool) unsafe.Pointer {
 	icicle.ReverseScalars(scalars_d, size)
@@ -51,10 +57,10 @@ func PolyOps(a_d, b_d, c_d, den_d unsafe.Pointer, size int) {
 	}
 }
 
-func MsmOnDevice(scalars_d, points_d unsafe.Pointer, count int, convert bool) (curve.G1Jac, unsafe.Pointer, error) {
+func MsmOnDevice(scalars_d, points_d unsafe.Pointer, count, bucketFactor int, convert bool) (curve.G1Jac, unsafe.Pointer, error) {
 	out_d, _ := device.CudaMalloc(96)
 
-	icicle.Commit(out_d, scalars_d, points_d, count)
+	icicle.Commit(out_d, scalars_d, points_d, count, bucketFactor)
 
 	if convert {
 		outHost := make([]icicle.PointBN254, 1)
@@ -63,5 +69,26 @@ func MsmOnDevice(scalars_d, points_d unsafe.Pointer, count int, convert bool) (c
 	}
 
 	return curve.G1Jac{}, out_d, nil
+}
 
+func MsmG2OnDevice(scalars_d, points_d unsafe.Pointer, count, bucketFactor int, convert bool) (curve.G2Jac, unsafe.Pointer, error) {
+	out_d, _ := device.CudaMalloc(192)
+	
+	icicle.CommitG2(out_d, scalars_d, points_d, count, bucketFactor)
+	
+	if convert {
+		outHost := make([]icicle.G2Point, 1)
+		device.CudaMemCpyDtoH[icicle.G2Point](outHost, out_d, 192)
+		return *outHost[0].ToGnarkJac(), nil, nil
+	}
+
+	return curve.G2Jac{}, out_d, nil
+}
+
+func CopyToDevice(scalars []fr.Element, bytes int, copyDone chan unsafe.Pointer) {
+	devicePtr, _ := device.CudaMalloc(bytes)
+	device.CudaMemCpyHtoD[fr.Element](devicePtr, scalars, bytes)
+	MontConvOnDevice(devicePtr, len(scalars), false)
+
+	copyDone <- devicePtr
 }

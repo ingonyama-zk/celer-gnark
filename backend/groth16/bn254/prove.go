@@ -18,6 +18,9 @@ package groth16
 
 import (
 	"fmt"
+	"math/big"
+	"time"
+	"unsafe"
 	"github.com/consensys/gnark-crypto/ecc"
 	curve "github.com/consensys/gnark-crypto/ecc/bn254"
 	"github.com/consensys/gnark-crypto/ecc/bn254/fr"
@@ -26,12 +29,8 @@ import (
 	"github.com/consensys/gnark/constraint/bn254"
 	"github.com/consensys/gnark/constraint/solver"
 	"github.com/consensys/gnark/logger"
-	"math/big"
-	"runtime"
-	"time"
-	"unsafe"
+	goicicle "github.com/ingonyama-zk/icicle/goicicle"
 	icicle "github.com/ingonyama-zk/icicle/goicicle/curves/bn254"
-	device "github.com/ingonyama-zk/icicle/goicicle"
 )
 
 // Proof represents a Groth16 proof that was encoded with a ProvingKey and can be verified
@@ -53,6 +52,8 @@ func (proof *Proof) CurveID() ecc.ID {
 	return curve.ID
 }
 
+const BUCKET_FACTOR int = 10
+
 // Prove generates the proof of knowledge of a r1cs with full witness (secret + public part).
 func Prove(r1cs *cs.R1CS, pk *ProvingKey, fullWitness witness.Witness, opts ...backend.ProverOption) (*Proof, error) {
 	opt, err := backend.NewProverConfig(opts...)
@@ -60,7 +61,7 @@ func Prove(r1cs *cs.R1CS, pk *ProvingKey, fullWitness witness.Witness, opts ...b
 		return nil, err
 	}
 
-	log := logger.Logger().With().Str("curve", r1cs.CurveID().String()).Int("nbConstraints", len(r1cs.Constraints)).Str("backend", "groth16").Logger()
+	log := logger.Logger().With().Str("curve", r1cs.CurveID().String()).Int("nbConstraints", r1cs.GetNbConstraints()).Str("backend", "groth16").Logger()
 
 	proof := &Proof{}
 
@@ -116,11 +117,11 @@ func Prove(r1cs *cs.R1CS, pk *ProvingKey, fullWitness witness.Witness, opts ...b
 
 	// we need to copy and filter the wireValues for each multi exp
 	// as pk.G1.A, pk.G1.B and pk.G2.B may have (a significant) number of point at infinity
-	var wireValuesA, wireValuesB []fr.Element
+	var wireValuesADevice, wireValuesBDevice OnDeviceData
 	chWireValuesA, chWireValuesB := make(chan struct{}, 1), make(chan struct{}, 1)
 
 	go func() {
-		wireValuesA = make([]fr.Element, len(wireValues)-int(pk.NbInfinityA))
+		wireValuesA := make([]fr.Element, len(wireValues)-int(pk.NbInfinityA))
 		for i, j := 0, 0; j < len(wireValuesA); i++ {
 			if pk.InfinityA[i] {
 				continue
@@ -128,10 +129,18 @@ func Prove(r1cs *cs.R1CS, pk *ProvingKey, fullWitness witness.Witness, opts ...b
 			wireValuesA[j] = wireValues[i]
 			j++
 		}
+
+		wireValuesASize := len(wireValuesA)
+		scalarBytes := wireValuesASize*fr.Bytes
+		wireValuesADevicePtr, _ := goicicle.CudaMalloc(scalarBytes)
+		goicicle.CudaMemCpyHtoD[fr.Element](wireValuesADevicePtr, wireValuesA, scalarBytes)
+		MontConvOnDevice(wireValuesADevicePtr, wireValuesASize, false)
+		wireValuesADevice = OnDeviceData{wireValuesADevicePtr, wireValuesASize}
+
 		close(chWireValuesA)
 	}()
 	go func() {
-		wireValuesB = make([]fr.Element, len(wireValues)-int(pk.NbInfinityB))
+		wireValuesB := make([]fr.Element, len(wireValues)-int(pk.NbInfinityB))
 		for i, j := 0, 0; j < len(wireValuesB); i++ {
 			if pk.InfinityB[i] {
 				continue
@@ -139,6 +148,14 @@ func Prove(r1cs *cs.R1CS, pk *ProvingKey, fullWitness witness.Witness, opts ...b
 			wireValuesB[j] = wireValues[i]
 			j++
 		}
+
+		wireValuesBSize := len(wireValuesB)
+		scalarBytes := wireValuesBSize*fr.Bytes
+		wireValuesBDevicePtr, _ := goicicle.CudaMalloc(scalarBytes)
+		goicicle.CudaMemCpyHtoD[fr.Element](wireValuesBDevicePtr, wireValuesB, scalarBytes)
+		MontConvOnDevice(wireValuesBDevicePtr, wireValuesBSize, false)
+		wireValuesBDevice = OnDeviceData{wireValuesBDevicePtr, wireValuesBSize}
+
 		close(chWireValuesB)
 	}()
 
@@ -161,18 +178,10 @@ func Prove(r1cs *cs.R1CS, pk *ProvingKey, fullWitness witness.Witness, opts ...b
 
 	var bs1, ar curve.G1Jac
 
-	n := runtime.NumCPU()
-
 	computeBS1 := func() {
 		<-chWireValuesB
 
-		scals := wireValuesB
-		scalarBytes := len(scals)*32
-		scalars_d, _ := device.CudaMalloc(scalarBytes)
-		device.CudaMemCpyHtoD[fr.Element](scalars_d, scals, scalarBytes)
-		MontConvOnDevice(scalars_d, len(scals), false)
-		
-		icicleRes, _, _ := MsmOnDevice(scalars_d, pk.G1Device.B, len(scals), true)
+		icicleRes, _, _ := MsmOnDevice(wireValuesBDevice.p, pk.G1Device.B, wireValuesBDevice.size, BUCKET_FACTOR, true)
 		
 		bs1 = icicleRes
 		bs1.AddMixed(&pk.G1.Beta)
@@ -181,15 +190,9 @@ func Prove(r1cs *cs.R1CS, pk *ProvingKey, fullWitness witness.Witness, opts ...b
 
 	computeAR1 := func() {
 		<-chWireValuesA
+		
+		icicleRes, _, _ := MsmOnDevice(wireValuesADevice.p, pk.G1Device.A, wireValuesADevice.size, BUCKET_FACTOR, true)
 
-		scals := wireValuesA
-		scalarBytes := len(scals)*32
-		scalars_d, _ := device.CudaMalloc(scalarBytes)
-		device.CudaMemCpyHtoD[fr.Element](scalars_d, scals, scalarBytes)
-		MontConvOnDevice(scalars_d, len(scals), false)
-		
-		icicleRes, _, _ := MsmOnDevice(scalars_d, pk.G1Device.A, len(scals), true)
-		
 		ar = icicleRes
 		ar.AddMixed(&pk.G1.Alpha)
 		ar.AddMixed(&deltas[0])
@@ -203,7 +206,7 @@ func Prove(r1cs *cs.R1CS, pk *ProvingKey, fullWitness witness.Witness, opts ...b
 		var krs, krs2, p1 curve.G1Jac
 		sizeH := int(pk.Domain.Cardinality - 1) // comes from the fact the deg(H)=(n-1)+(n-1)-n=n-2
 
-		icicleRes, _, _ := MsmOnDevice(h, pk.G1Device.Z, sizeH, true)
+		icicleRes, _, _ := MsmOnDevice(h, pk.G1Device.Z, sizeH, BUCKET_FACTOR, true)
 		
 		krs2 = icicleRes
 		// filter the wire values if needed;
@@ -211,11 +214,11 @@ func Prove(r1cs *cs.R1CS, pk *ProvingKey, fullWitness witness.Witness, opts ...b
 
 		scals := _wireValues[r1cs.GetNbPublicVariables():]
 		scalarBytes := len(scals)*32
-		scalars_d, _ := device.CudaMalloc(scalarBytes)
-		device.CudaMemCpyHtoD[fr.Element](scalars_d, scals, scalarBytes)
+		scalars_d, _ := goicicle.CudaMalloc(scalarBytes)
+		goicicle.CudaMemCpyHtoD[fr.Element](scalars_d, scals, scalarBytes)
 		MontConvOnDevice(scalars_d, len(scals), false)
 		
-		icicleRes, _, _ = MsmOnDevice(scalars_d, pk.G1Device.K, len(scals), true)
+		icicleRes, _, _ = MsmOnDevice(scalars_d, pk.G1Device.K, len(scals), BUCKET_FACTOR, true)
 		
 		krs = icicleRes
 		krs.AddMixed(&deltas[2])
@@ -235,21 +238,11 @@ func Prove(r1cs *cs.R1CS, pk *ProvingKey, fullWitness witness.Witness, opts ...b
 		// Bs2 (1 multi exp G2 - size = len(wires))
 		var Bs, deltaS curve.G2Jac
 
-		nbTasks := n
-		if nbTasks <= 16 {
-			// if we don't have a lot of CPUs, this may artificially split the MSM
-			nbTasks *= 2
-		}
 		<-chWireValuesB
 
-		bsg2_time := time.Now()
-		_, err := Bs.MultiExp(pk.G2.B, wireValuesB, ecc.MultiExpConfig{NbTasks: nbTasks})
-		log.Debug().Dur("took", time.Since(bsg2_time)).Msg("Original API: MSM G2 BS")
-		
-		if err != nil {
-			return err
-		}
+		icicleG2Res, _, _  := MsmG2OnDevice(wireValuesBDevice.p, pk.G2Device.B, wireValuesBDevice.size, BUCKET_FACTOR, true)
 
+		Bs = icicleG2Res
 		deltaS.FromAffine(&pk.G2.Delta)
 		deltaS.ScalarMultiplication(&deltaS, &s)
 		Bs.AddAssign(&deltaS)
@@ -269,7 +262,7 @@ func Prove(r1cs *cs.R1CS, pk *ProvingKey, fullWitness witness.Witness, opts ...b
 	if err := computeBS2(); err != nil {
 		return nil, err
 	}
-
+	
 	log.Debug().Dur("took", time.Since(start)).Msg("prover done; TOTAL PROVE TIME")
 
 	return proof, nil
@@ -298,14 +291,6 @@ func filter(slice []fr.Element, toRemove []int) (r []fr.Element) {
 	return r
 }
 
-func copyToDevice(scalars []fr.Element, bytes int, copyDone chan unsafe.Pointer) {
-	devicePtr, _ := device.CudaMalloc(bytes)
-	device.CudaMemCpyHtoD[fr.Element](devicePtr, scalars, bytes)
-	MontConvOnDevice(devicePtr, len(scalars), false)
-
-	copyDone <- devicePtr
-}
-
 func computeH(a, b, c []fr.Element, pk *ProvingKey) unsafe.Pointer {
 	// H part of Krs
 	// Compute H (hz=ab-c, where z=-2 on ker X^n+1 (z(x)=x^n-1))
@@ -329,9 +314,9 @@ func computeH(a, b, c []fr.Element, pk *ProvingKey) unsafe.Pointer {
 	copyBDone := make(chan unsafe.Pointer, 1)
 	copyCDone := make(chan unsafe.Pointer, 1)
 
-	go copyToDevice(a, sizeBytes, copyADone)
-	go copyToDevice(b, sizeBytes, copyBDone)
-	go copyToDevice(c, sizeBytes, copyCDone)
+	go CopyToDevice(a, sizeBytes, copyADone)
+	go CopyToDevice(b, sizeBytes, copyBDone)
+	go CopyToDevice(c, sizeBytes, copyCDone)
 
 	a_device := <- copyADone
 	b_device := <- copyBDone
