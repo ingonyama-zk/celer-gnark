@@ -2,6 +2,7 @@ package groth16
 
 import (
 	"fmt"
+	"github.com/ingonyama-zk/iciclegnark/curves/bn254"
 	"runtime"
 	"sync"
 	"time"
@@ -15,7 +16,7 @@ import (
 )
 
 type OnDeviceData struct {
-	p unsafe.Pointer
+	p    unsafe.Pointer
 	size int
 }
 
@@ -90,11 +91,11 @@ func NttBN254GnarkAdapter(domain *fft.Domain, coset bool, scalars []fr.Element, 
 		}
 	}
 
-	nttResult := icicle.BatchConvertFromFrGnark[icicle.ScalarField](scalars)
+	nttResult := bn254.BatchConvertFromFrGnark[icicle.G1ScalarField](scalars)
 	icicle.NttBN254(&nttResult, isInverse, decimation, deviceId)
 
 	if coset && isInverse {
-		res := icicle.BatchConvertToFrGnark[icicle.ScalarField](nttResult)
+		res := bn254.BatchConvertG1ScalarFieldToFrGnark[icicle.G1ScalarField](nttResult)
 
 		scale := func(cosetTable []fr.Element) {
 			Execute(len(res), func(start, end int) {
@@ -112,11 +113,11 @@ func NttBN254GnarkAdapter(domain *fft.Domain, coset bool, scalars []fr.Element, 
 		return res
 	}
 
-	return icicle.BatchConvertToFrGnark[icicle.ScalarField](nttResult)
+	return bn254.BatchConvertG1ScalarFieldToFrGnark[icicle.G1ScalarField](nttResult)
 }
 
 func INttOnDevice(scalars_d, twiddles_d, cosetPowers_d unsafe.Pointer, size, sizeBytes int, isCoset bool) (unsafe.Pointer, []time.Duration) {
-	var timings []time.Duration	
+	var timings []time.Duration
 	revTime := time.Now()
 	icicle.ReverseScalars(scalars_d, size)
 	revTimeElapsed := time.Since(revTime)
@@ -130,7 +131,7 @@ func INttOnDevice(scalars_d, twiddles_d, cosetPowers_d unsafe.Pointer, size, siz
 	return scalarsInterp, timings
 }
 
-func MontConvOnDevice(scalars_d unsafe.Pointer, size int, is_into bool) ([]time.Duration) {
+func MontConvOnDevice(scalars_d unsafe.Pointer, size int, is_into bool) []time.Duration {
 	var timings []time.Duration
 	revTime := time.Now()
 	if is_into {
@@ -165,23 +166,22 @@ func NttOnDevice(scalars_out, scalars_d, twiddles_d, coset_powers_d unsafe.Point
 
 func MsmBN254GnarkAdapter(points []curve.G1Affine, scalars []fr.Element) (curve.G1Jac, error, []time.Duration) {
 	var timings []time.Duration
-	out := new(icicle.PointBN254)
+	out := new(icicle.G1ProjectivePoint)
 
 	convSTime := time.Now()
-	parsedScalars := icicle.BatchConvertFromFrGnark[icicle.ScalarField](scalars)
+	parsedScalars := bn254.BatchConvertFromFrGnark[icicle.G1ScalarField](scalars)
 	timings = append(timings, time.Since(convSTime))
 
 	convPTime := time.Now()
-	parsedPoints := icicle.BatchConvertFromG1Affine(points)
+	parsedPoints := bn254.BatchConvertFromG1Affine(points)
 	timings = append(timings, time.Since(convPTime))
 
 	msmTime := time.Now()
 	_, err := icicle.MsmBN254(out, parsedPoints, parsedScalars, 0)
 	timings = append(timings, time.Since(msmTime))
 
-	return *out.ToGnarkJac(), err, timings
+	return *bn254.G1ProjectivePointToGnarkJac(out), err, timings
 }
-
 
 func PolyOps(a_d, b_d, c_d, den_d unsafe.Pointer, size int) (timings []time.Duration) {
 	convSTime := time.Now()
@@ -205,7 +205,7 @@ func PolyOps(a_d, b_d, c_d, den_d unsafe.Pointer, size int) (timings []time.Dura
 	if ret != 0 {
 		fmt.Print("Vector mult a*den issue")
 	}
-	
+
 	return
 }
 
@@ -217,9 +217,9 @@ func MsmOnDevice(scalars_d, points_d unsafe.Pointer, count, bucketFactor int, co
 	timings := time.Since(msmTime)
 
 	if convert {
-		outHost := make([]icicle.PointBN254, 1)
-		cudawrapper.CudaMemCpyDtoH[icicle.PointBN254](outHost, out_d, 96)
-		return *outHost[0].ToGnarkJac(), nil, nil, timings
+		outHost := make([]icicle.G1ProjectivePoint, 1)
+		cudawrapper.CudaMemCpyDtoH[icicle.G1ProjectivePoint](outHost, out_d, 96)
+		return *bn254.G1ProjectivePointToGnarkJac(&outHost[0]), nil, nil, timings
 	}
 
 	return curve.G1Jac{}, out_d, nil, timings
@@ -227,15 +227,15 @@ func MsmOnDevice(scalars_d, points_d unsafe.Pointer, count, bucketFactor int, co
 
 func MsmG2OnDevice(scalars_d, points_d unsafe.Pointer, count, bucketFactor int, convert bool) (curve.G2Jac, unsafe.Pointer, error, time.Duration) {
 	out_d, _ := cudawrapper.CudaMalloc(192)
-	
+
 	msmTime := time.Now()
 	icicle.CommitG2(out_d, scalars_d, points_d, count, bucketFactor)
 	timings := time.Since(msmTime)
-	
+
 	if convert {
 		outHost := make([]icicle.G2Point, 1)
 		cudawrapper.CudaMemCpyDtoH[icicle.G2Point](outHost, out_d, 192)
-		return *outHost[0].ToGnarkJac(), nil, nil, timings
+		return *bn254.G2PointToGnarkJac(&outHost[0]), nil, nil, timings
 	}
 
 	return curve.G2Jac{}, out_d, nil, timings
