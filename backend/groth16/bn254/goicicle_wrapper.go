@@ -2,7 +2,6 @@ package groth16
 
 import (
 	"fmt"
-	"github.com/ingonyama-zk/iciclegnark/curves/bn254"
 	"runtime"
 	"sync"
 	"time"
@@ -13,6 +12,7 @@ import (
 	"github.com/consensys/gnark-crypto/ecc/bn254/fr/fft"
 	cudawrapper "github.com/ingonyama-zk/icicle/goicicle"
 	icicle "github.com/ingonyama-zk/icicle/goicicle/curves/bn254"
+	"github.com/ingonyama-zk/iciclegnark/curves/bn254"
 )
 
 type OnDeviceData struct {
