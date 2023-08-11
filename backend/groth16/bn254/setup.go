@@ -17,22 +17,23 @@
 package groth16
 
 import (
+	"fmt"
+	"github.com/ingonyama-zk/iciclegnark/curves/bn254"
 	"math"
 	"math/big"
 	"math/bits"
 	"unsafe"
-	"fmt"
 
 	"github.com/consensys/gnark-crypto/ecc"
 	curve "github.com/consensys/gnark-crypto/ecc/bn254"
-	"github.com/consensys/gnark-crypto/ecc/bn254/fr"
 	"github.com/consensys/gnark-crypto/ecc/bn254/fp"
+	"github.com/consensys/gnark-crypto/ecc/bn254/fr"
 	"github.com/consensys/gnark-crypto/ecc/bn254/fr/fft"
 	"github.com/consensys/gnark-crypto/ecc/bn254/fr/pedersen"
 	"github.com/consensys/gnark/constraint"
 	"github.com/consensys/gnark/constraint/bn254"
-	icicle "github.com/ingonyama-zk/icicle/goicicle/curves/bn254"
 	goicicle "github.com/ingonyama-zk/icicle/goicicle"
+	icicle "github.com/ingonyama-zk/icicle/goicicle/curves/bn254"
 )
 
 // ProvingKey is used by a Groth16 prover to encode a proof of a statement
@@ -50,12 +51,12 @@ type ProvingKey struct {
 	}
 
 	G1Device struct {
-		A, B, K, Z			unsafe.Pointer
+		A, B, K, Z unsafe.Pointer
 	}
 
 	DomainDevice struct {
-		Twiddles, TwiddlesInv		unsafe.Pointer
-		CosetTable, CosetTableInv	unsafe.Pointer
+		Twiddles, TwiddlesInv     unsafe.Pointer
+		CosetTable, CosetTableInv unsafe.Pointer
 	}
 
 	// [β]2, [δ]2, [B(t)]2
@@ -65,10 +66,10 @@ type ProvingKey struct {
 	}
 
 	G2Device struct {
-		B			unsafe.Pointer
+		B unsafe.Pointer
 	}
 
-	DenDevice		unsafe.Pointer
+	DenDevice unsafe.Pointer
 
 	// if InfinityA[i] == true, the point G1.A[i] == infinity
 	InfinityA, InfinityB     []bool
@@ -332,17 +333,17 @@ func Setup(r1cs *cs.R1CS, pk *ProvingKey, vk *VerifyingKey) error {
 
 func (pk *ProvingKey) setupDevicePointers() {
 	n := int(pk.Domain.Cardinality)
-	sizeBytes := n*fr.Bytes
-	
+	sizeBytes := n * fr.Bytes
+
 	/*************************  Start Domain Device Setup  ***************************/
-	
+
 	/*************************     CosetTableInv      ***************************/
 	cosetPowersInv_d, _ := goicicle.CudaMalloc(sizeBytes)
 	goicicle.CudaMemCpyHtoD[fr.Element](cosetPowersInv_d, pk.Domain.CosetTableInv, sizeBytes)
 	MontConvOnDevice(cosetPowersInv_d, len(pk.Domain.CosetTable), false)
 
 	pk.DomainDevice.CosetTableInv = cosetPowersInv_d
-	
+
 	/*************************     CosetTable      ***************************/
 	cosetPowers_d, _ := goicicle.CudaMalloc(sizeBytes)
 	goicicle.CudaMemCpyHtoD[fr.Element](cosetPowers_d, pk.Domain.CosetTable, sizeBytes)
@@ -374,8 +375,8 @@ func (pk *ProvingKey) setupDevicePointers() {
 
 	den_d, _ := goicicle.CudaMalloc(sizeBytes)
 	log2Size := int(math.Floor(math.Log2(float64(n))))
-	denIcicle := *icicle.NewFieldFromFrGnark[icicle.ScalarField](denI)
-	denIcicleArr := []icicle.ScalarField{denIcicle}
+	denIcicle := *bn254.NewFieldFromFrGnark[icicle.G1ScalarField](denI)
+	denIcicleArr := []icicle.G1ScalarField{denIcicle}
 	for i := 0; i < log2Size; i++ {
 		denIcicleArr = append(denIcicleArr, denIcicleArr...)
 	}
@@ -383,42 +384,42 @@ func (pk *ProvingKey) setupDevicePointers() {
 		denIcicleArr = append(denIcicleArr, denIcicle)
 	}
 
-	goicicle.CudaMemCpyHtoD[icicle.ScalarField](den_d, denIcicleArr, sizeBytes)
+	goicicle.CudaMemCpyHtoD[icicle.G1ScalarField](den_d, denIcicleArr, sizeBytes)
 
 	pk.DenDevice = den_d
 
 	/*************************  End Domain Device Setup  ***************************/
-	
+
 	/*************************  Start G1 Device Setup  ***************************/
 	/*************************     A      ***************************/
 	pointsBytesA := len(pk.G1.A) * fp.Bytes * 2
 	a_d, _ := goicicle.CudaMalloc(pointsBytesA)
-	iciclePointsA := icicle.BatchConvertFromG1Affine(pk.G1.A)
-	goicicle.CudaMemCpyHtoD[icicle.PointAffineNoInfinityBN254](a_d, iciclePointsA, pointsBytesA)
-	
+	iciclePointsA := bn254.BatchConvertFromG1Affine(pk.G1.A)
+	goicicle.CudaMemCpyHtoD[icicle.G1PointAffine](a_d, iciclePointsA, pointsBytesA)
+
 	pk.G1Device.A = a_d
 
 	/*************************     B      ***************************/
 	pointsBytesB := len(pk.G1.B) * fp.Bytes * 2
 	b_d, _ := goicicle.CudaMalloc(pointsBytesB)
-	iciclePointsB := icicle.BatchConvertFromG1Affine(pk.G1.B)
-	goicicle.CudaMemCpyHtoD[icicle.PointAffineNoInfinityBN254](b_d, iciclePointsB, pointsBytesB)
-	
+	iciclePointsB := bn254.BatchConvertFromG1Affine(pk.G1.B)
+	goicicle.CudaMemCpyHtoD[icicle.G1PointAffine](b_d, iciclePointsB, pointsBytesB)
+
 	pk.G1Device.B = b_d
-	
+
 	/*************************     K      ***************************/
 	pointsBytesK := len(pk.G1.K) * fp.Bytes * 2
 	k_d, _ := goicicle.CudaMalloc(pointsBytesK)
-	iciclePointsK := icicle.BatchConvertFromG1Affine(pk.G1.K)
-	goicicle.CudaMemCpyHtoD[icicle.PointAffineNoInfinityBN254](k_d, iciclePointsK, pointsBytesK)
-	
+	iciclePointsK := bn254.BatchConvertFromG1Affine(pk.G1.K)
+	goicicle.CudaMemCpyHtoD[icicle.G1PointAffine](k_d, iciclePointsK, pointsBytesK)
+
 	pk.G1Device.K = k_d
 
 	/*************************     Z      ***************************/
 	pointsBytesZ := len(pk.G1.Z) * fp.Bytes * 2
 	z_d, _ := goicicle.CudaMalloc(pointsBytesZ)
-	iciclePointsZ := icicle.BatchConvertFromG1Affine(pk.G1.Z)
-	goicicle.CudaMemCpyHtoD[icicle.PointAffineNoInfinityBN254](z_d, iciclePointsZ, pointsBytesZ)
+	iciclePointsZ := bn254.BatchConvertFromG1Affine(pk.G1.Z)
+	goicicle.CudaMemCpyHtoD[icicle.G1PointAffine](z_d, iciclePointsZ, pointsBytesZ)
 
 	pk.G1Device.Z = z_d
 	/*************************  End G1 Device Setup  ***************************/
@@ -426,12 +427,13 @@ func (pk *ProvingKey) setupDevicePointers() {
 	/*************************  Start G2 Device Setup  ***************************/
 	pointsBytesB2 := len(pk.G2.B) * fp.Bytes * 4
 	b2_d, _ := goicicle.CudaMalloc(pointsBytesB2)
-	iciclePointsB2 := icicle.BatchConvertFromG2Affine(pk.G2.B)
+	iciclePointsB2 := bn254.BatchConvertFromG2Affine(pk.G2.B)
 	goicicle.CudaMemCpyHtoD[icicle.G2PointAffine](b2_d, iciclePointsB2, pointsBytesB2)
 	pk.G2Device.B = b2_d
 	/*************************  End G2 Device Setup  ***************************/
 
 }
+
 // Precompute sets e, -[δ]2, -[γ]2
 // This is meant to be called internally during setup or deserialization.
 func (vk *VerifyingKey) Precompute() error {
