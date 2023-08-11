@@ -95,7 +95,7 @@ func NttBN254GnarkAdapter(domain *fft.Domain, coset bool, scalars []fr.Element, 
 	icicle.NttBN254(&nttResult, isInverse, decimation, deviceId)
 
 	if coset && isInverse {
-		res := bn254.BatchConvertG1ScalarFieldToFrGnark[icicle.G1ScalarField](nttResult)
+		res := bn254.BatchConvertG1ScalarFieldToFrGnark(nttResult)
 
 		scale := func(cosetTable []fr.Element) {
 			Execute(len(res), func(start, end int) {
@@ -113,7 +113,7 @@ func NttBN254GnarkAdapter(domain *fft.Domain, coset bool, scalars []fr.Element, 
 		return res
 	}
 
-	return bn254.BatchConvertG1ScalarFieldToFrGnark[icicle.G1ScalarField](nttResult)
+	return bn254.BatchConvertG1ScalarFieldToFrGnark(nttResult)
 }
 
 func INttOnDevice(scalars_d, twiddles_d, cosetPowers_d unsafe.Pointer, size, sizeBytes int, isCoset bool) (unsafe.Pointer, []time.Duration) {
