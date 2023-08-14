@@ -10,7 +10,6 @@ require (
 	github.com/fxamacker/cbor/v2 v2.4.0
 	github.com/google/go-cmp v0.5.9
 	github.com/google/pprof v0.0.0-20230309165930-d61513b1440d
-	//github.com/ingonyama-zk/icicle v0.0.0-20230719184412-d13143506ece
 	github.com/ingonyama-zk/icicle v0.0.0-20230809142854-b51b424effe7
 	github.com/ingonyama-zk/iciclegnark v0.0.0-20230806090248-830300d9edfe
 	github.com/leanovate/gopter v0.2.9
