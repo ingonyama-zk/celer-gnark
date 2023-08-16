@@ -335,5 +335,9 @@ func (pk *ProvingKey) readFrom(r io.Reader, decOptions ...func(*curve.Decoder)) 
 		return dec.BytesRead(), err
 	}
 
-	return n + dec.BytesRead(), nil
+	size := n + dec.BytesRead()
+
+	pk.setupDevicePointers()
+
+	return size, nil
 }
