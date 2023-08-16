@@ -1,5 +1,13 @@
-on: pull_request
-name: pull_request
+on:
+  push:
+    branches:
+      - icicle-integration
+  pull_request:
+    branches:
+      - icicle-integration
+
+name: CI on icicle-integration
+
 jobs:
   staticcheck:
     runs-on: ubuntu-latest
@@ -22,6 +30,8 @@ jobs:
         key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
         restore-keys: |
           ${{ runner.os }}-go-
+    - name: cuda toolkit setup
+      uses: Jimver/cuda-toolkit@v0.2.9
     - name: golangci-lint
       uses: golangci/golangci-lint-action@v3
       with:
@@ -35,7 +45,7 @@ jobs:
         go generate ./...
         git update-index --assume-unchanged go.mod
         git update-index --assume-unchanged go.sum
-        if [[ -n $(git status --porcelain) ]]; then echo "git repo is dirty after runing go generate -- please don't modify generated files"; echo $(git diff);echo $(git status --porcelain); exit 1; fi
+        if [[ -n $(git status --porcelain) ]]; then echo "git repo is dirty after running go generate -- please don't modify generated files"; echo $(git diff); echo $(git status --porcelain); exit 1; fi
   
   test:
     strategy:
