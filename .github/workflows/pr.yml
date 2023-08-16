@@ -24,6 +24,7 @@ jobs:
           ${{ runner.os }}-go-
     - name: golangci-lint
       uses: golangci/golangci-lint-action@v3
+      uses: Jimver/cuda-toolkit@v0.2.9
       with:
           args: --timeout=5m
     - name: install deps
