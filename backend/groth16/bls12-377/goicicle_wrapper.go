@@ -7,12 +7,12 @@ import (
 	"time"
 	"unsafe"
 
-	curve "github.com/consensys/gnark-crypto/ecc/bn254"
-	"github.com/consensys/gnark-crypto/ecc/bn254/fr"
-	"github.com/consensys/gnark-crypto/ecc/bn254/fr/fft"
+	curve "github.com/consensys/gnark-crypto/ecc/bls12-377"
+	"github.com/consensys/gnark-crypto/ecc/bls12-377/fr"
+	"github.com/consensys/gnark-crypto/ecc/bls12-377/fr/fft"
 	cudawrapper "github.com/ingonyama-zk/icicle/goicicle"
-	icicle "github.com/ingonyama-zk/icicle/goicicle/curves/bn254"
-	"github.com/ingonyama-zk/iciclegnark/curves/bn254"
+	icicle "github.com/ingonyama-zk/icicle/goicicle/curves/bls12377"
+	"github.com/ingonyama-zk/iciclegnark/curves/bls12377"
 )
 
 type OnDeviceData struct {
@@ -75,7 +75,7 @@ func Execute(nbIterations int, work func(int, int), maxCpus ...int) {
 * todo: add conditional rendering
  */
 
-func NttBN254GnarkAdapter(domain *fft.Domain, coset bool, scalars []fr.Element, isInverse bool, decimation int, deviceId int) []fr.Element {
+func NttBNBls12377GnarkAdapter(domain *fft.Domain, coset bool, scalars []fr.Element, isInverse bool, decimation int, deviceId int) []fr.Element {
 	if coset && !isInverse {
 		scale := func(cosetTable []fr.Element) {
 			Execute(len(scalars), func(start, end int) {
@@ -91,11 +91,11 @@ func NttBN254GnarkAdapter(domain *fft.Domain, coset bool, scalars []fr.Element, 
 		}
 	}
 
-	nttResult := bn254.BatchConvertFromFrGnark[icicle.G1ScalarField](scalars)
+	nttResult := bls12377.BatchConvertFromFrGnark[icicle.G1ScalarField](scalars)
 	icicle.Ntt(&nttResult, isInverse, decimation, deviceId)
 
 	if coset && isInverse {
-		res := bn254.BatchConvertG1ScalarFieldToFrGnark(nttResult)
+		res := bls12377.BatchConvertG1ScalarFieldToFrGnark(nttResult)
 
 		scale := func(cosetTable []fr.Element) {
 			Execute(len(res), func(start, end int) {
@@ -113,7 +113,7 @@ func NttBN254GnarkAdapter(domain *fft.Domain, coset bool, scalars []fr.Element, 
 		return res
 	}
 
-	return bn254.BatchConvertG1ScalarFieldToFrGnark(nttResult)
+	return bls12377.BatchConvertG1ScalarFieldToFrGnark(nttResult)
 }
 
 func INttOnDevice(scalars_d, twiddles_d, cosetPowers_d unsafe.Pointer, size, sizeBytes int, isCoset bool) (unsafe.Pointer, []time.Duration) {
@@ -164,23 +164,23 @@ func NttOnDevice(scalars_out, scalars_d, twiddles_d, coset_powers_d unsafe.Point
 	return timings
 }
 
-func MsmBN254GnarkAdapter(points []curve.G1Affine, scalars []fr.Element) (curve.G1Jac, error, []time.Duration) {
+func MsmBNBls12377GnarkAdapter(points []curve.G1Affine, scalars []fr.Element) (curve.G1Jac, error, []time.Duration) {
 	var timings []time.Duration
 	out := new(icicle.G1ProjectivePoint)
 
 	convSTime := time.Now()
-	parsedScalars := bn254.BatchConvertFromFrGnark[icicle.G1ScalarField](scalars)
+	parsedScalars := bls12377.BatchConvertFromFrGnark[icicle.G1ScalarField](scalars)
 	timings = append(timings, time.Since(convSTime))
 
 	convPTime := time.Now()
-	parsedPoints := bn254.BatchConvertFromG1Affine(points)
+	parsedPoints := bls12377.BatchConvertFromG1Affine(points)
 	timings = append(timings, time.Since(convPTime))
 
 	msmTime := time.Now()
 	_, err := icicle.Msm(out, parsedPoints, parsedScalars, 0)
 	timings = append(timings, time.Since(msmTime))
 
-	return *bn254.G1ProjectivePointToGnarkJac(out), err, timings
+	return *bls12377.G1ProjectivePointToGnarkJac(out), err, timings
 }
 
 func PolyOps(a_d, b_d, c_d, den_d unsafe.Pointer, size int) (timings []time.Duration) {
@@ -219,7 +219,7 @@ func MsmOnDevice(scalars_d, points_d unsafe.Pointer, count, bucketFactor int, co
 	if convert {
 		outHost := make([]icicle.G1ProjectivePoint, 1)
 		cudawrapper.CudaMemCpyDtoH[icicle.G1ProjectivePoint](outHost, out_d, 96)
-		return *bn254.G1ProjectivePointToGnarkJac(&outHost[0]), nil, nil, timings
+		return *bls12377.G1ProjectivePointToGnarkJac(&outHost[0]), nil, nil, timings
 	}
 
 	return curve.G1Jac{}, out_d, nil, timings
@@ -235,7 +235,7 @@ func MsmG2OnDevice(scalars_d, points_d unsafe.Pointer, count, bucketFactor int, 
 	if convert {
 		outHost := make([]icicle.G2Point, 1)
 		cudawrapper.CudaMemCpyDtoH[icicle.G2Point](outHost, out_d, 192)
-		return *bn254.G2PointToGnarkJac(&outHost[0]), nil, nil, timings
+		return *bls12377.G2PointToGnarkJac(&outHost[0]), nil, nil, timings
 	}
 
 	return curve.G2Jac{}, out_d, nil, timings
