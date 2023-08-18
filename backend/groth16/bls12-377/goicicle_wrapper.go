@@ -75,7 +75,7 @@ func Execute(nbIterations int, work func(int, int), maxCpus ...int) {
 * todo: add conditional rendering
  */
 
-func NttBNBls12377GnarkAdapter(domain *fft.Domain, coset bool, scalars []fr.Element, isInverse bool, decimation int, deviceId int) []fr.Element {
+func NttBls12377GnarkAdapter(domain *fft.Domain, coset bool, scalars []fr.Element, isInverse bool, decimation int, deviceId int) []fr.Element {
 	if coset && !isInverse {
 		scale := func(cosetTable []fr.Element) {
 			Execute(len(scalars), func(start, end int) {
@@ -164,7 +164,7 @@ func NttOnDevice(scalars_out, scalars_d, twiddles_d, coset_powers_d unsafe.Point
 	return timings
 }
 
-func MsmBNBls12377GnarkAdapter(points []curve.G1Affine, scalars []fr.Element) (curve.G1Jac, error, []time.Duration) {
+func MsmBls12377GnarkAdapter(points []curve.G1Affine, scalars []fr.Element) (curve.G1Jac, error, []time.Duration) {
 	var timings []time.Duration
 	out := new(icicle.G1ProjectivePoint)
 
