@@ -91,7 +91,7 @@ func NttBls12377GnarkAdapter(domain *fft.Domain, coset bool, scalars []fr.Elemen
 		}
 	}
 
-	nttResult := bls12377.BatchConvertFromFrGnark[icicle.G1ScalarField](scalars)
+	nttResult := bls12377.BatchConvertFromFrGnark(scalars)
 	icicle.Ntt(&nttResult, isInverse, decimation, deviceId)
 
 	if coset && isInverse {
@@ -169,7 +169,7 @@ func MsmBls12377GnarkAdapter(points []curve.G1Affine, scalars []fr.Element) (cur
 	out := new(icicle.G1ProjectivePoint)
 
 	convSTime := time.Now()
-	parsedScalars := bls12377.BatchConvertFromFrGnark[icicle.G1ScalarField](scalars)
+	parsedScalars := bls12377.BatchConvertFromFrGnark(scalars)
 	timings = append(timings, time.Since(convSTime))
 
 	convPTime := time.Now()

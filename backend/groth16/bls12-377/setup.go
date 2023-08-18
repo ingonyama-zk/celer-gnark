@@ -374,7 +374,7 @@ func (pk *ProvingKey) setupDevicePointers() {
 
 	den_d, _ := goicicle.CudaMalloc(sizeBytes)
 	log2Size := int(math.Floor(math.Log2(float64(n))))
-	denIcicle := *bls12377.NewFieldFromFrGnark[icicle.G1ScalarField](denI)
+	denIcicle := *bls12377.NewFieldFromFrGnark(denI)
 	denIcicleArr := []icicle.G1ScalarField{denIcicle}
 	for i := 0; i < log2Size; i++ {
 		denIcicleArr = append(denIcicleArr, denIcicleArr...)
