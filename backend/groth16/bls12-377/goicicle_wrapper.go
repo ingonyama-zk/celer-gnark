@@ -2,13 +2,13 @@ package groth16
 
 import (
 	"fmt"
-	"github.com/consensys/gnark-crypto/ecc/bls12-377/fp"
 	"runtime"
 	"sync"
 	"time"
 	"unsafe"
 
 	curve "github.com/consensys/gnark-crypto/ecc/bls12-377"
+	"github.com/consensys/gnark-crypto/ecc/bls12-377/fp"
 	"github.com/consensys/gnark-crypto/ecc/bls12-377/fr"
 	cudawrapper "github.com/ingonyama-zk/icicle/goicicle"
 	icicle "github.com/ingonyama-zk/icicle/goicicle/curves/bls12377"
