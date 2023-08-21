@@ -2,6 +2,7 @@ package groth16
 
 import (
 	"fmt"
+	"github.com/consensys/gnark-crypto/ecc/bls12-377/fp"
 	"runtime"
 	"sync"
 	"time"
@@ -9,7 +10,6 @@ import (
 
 	curve "github.com/consensys/gnark-crypto/ecc/bls12-377"
 	"github.com/consensys/gnark-crypto/ecc/bls12-377/fr"
-	"github.com/consensys/gnark-crypto/ecc/bls12-377/fr/fft"
 	cudawrapper "github.com/ingonyama-zk/icicle/goicicle"
 	icicle "github.com/ingonyama-zk/icicle/goicicle/curves/bls12377"
 	"github.com/ingonyama-zk/iciclegnark/curves/bls12377"
@@ -68,52 +68,6 @@ func Execute(nbIterations int, work func(int, int), maxCpus ...int) {
 	}
 
 	wg.Wait()
-}
-
-/*
-* Adapters - these adapters convert between icicle and gnark
-* todo: add conditional rendering
- */
-
-func NttBls12377GnarkAdapter(domain *fft.Domain, coset bool, scalars []fr.Element, isInverse bool, decimation int, deviceId int) []fr.Element {
-	if coset && !isInverse {
-		scale := func(cosetTable []fr.Element) {
-			Execute(len(scalars), func(start, end int) {
-				for i := start; i < end; i++ {
-					scalars[i].Mul(&scalars[i], &cosetTable[i])
-				}
-			}, runtime.NumCPU())
-		}
-		if decimation == icicle.DIT {
-			scale(domain.CosetTableReversed)
-		} else {
-			scale(domain.CosetTable)
-		}
-	}
-
-	nttResult := bls12377.BatchConvertFromFrGnark(scalars)
-	icicle.Ntt(&nttResult, isInverse, decimation, deviceId)
-
-	if coset && isInverse {
-		res := bls12377.BatchConvertG1ScalarFieldToFrGnark(nttResult)
-
-		scale := func(cosetTable []fr.Element) {
-			Execute(len(res), func(start, end int) {
-				for i := start; i < end; i++ {
-					res[i].Mul(&res[i], &cosetTable[i])
-				}
-			}, runtime.NumCPU())
-		}
-		if decimation == icicle.DIT {
-			scale(domain.CosetTableInv)
-		} else {
-			scale(domain.CosetTableInvReversed)
-		}
-
-		return res
-	}
-
-	return bls12377.BatchConvertG1ScalarFieldToFrGnark(nttResult)
 }
 
 func INttOnDevice(scalars_d, twiddles_d, cosetPowers_d unsafe.Pointer, size, sizeBytes int, isCoset bool) (unsafe.Pointer, []time.Duration) {
@@ -210,7 +164,9 @@ func PolyOps(a_d, b_d, c_d, den_d unsafe.Pointer, size int) (timings []time.Dura
 }
 
 func MsmOnDevice(scalars_d, points_d unsafe.Pointer, count, bucketFactor int, convert bool) (curve.G1Jac, unsafe.Pointer, error, time.Duration) {
-	out_d, _ := cudawrapper.CudaMalloc(96)
+	g1ProjPointBytes := fp.Bytes * 3
+
+	out_d, _ := cudawrapper.CudaMalloc(g1ProjPointBytes)
 
 	msmTime := time.Now()
 	icicle.Commit(out_d, scalars_d, points_d, count, bucketFactor)
@@ -218,7 +174,7 @@ func MsmOnDevice(scalars_d, points_d unsafe.Pointer, count, bucketFactor int, co
 
 	if convert {
 		outHost := make([]icicle.G1ProjectivePoint, 1)
-		cudawrapper.CudaMemCpyDtoH[icicle.G1ProjectivePoint](outHost, out_d, 96)
+		cudawrapper.CudaMemCpyDtoH[icicle.G1ProjectivePoint](outHost, out_d, g1ProjPointBytes)
 		return *bls12377.G1ProjectivePointToGnarkJac(&outHost[0]), nil, nil, timings
 	}
 
@@ -226,7 +182,8 @@ func MsmOnDevice(scalars_d, points_d unsafe.Pointer, count, bucketFactor int, co
 }
 
 func MsmG2OnDevice(scalars_d, points_d unsafe.Pointer, count, bucketFactor int, convert bool) (curve.G2Jac, unsafe.Pointer, error, time.Duration) {
-	out_d, _ := cudawrapper.CudaMalloc(192)
+	g2ProjPointBytes := fp.Bytes * 6 // X,Y,Z each with A0, A1 of fp.Bytes
+	out_d, _ := cudawrapper.CudaMalloc(g2ProjPointBytes)
 
 	msmTime := time.Now()
 	icicle.CommitG2(out_d, scalars_d, points_d, count, bucketFactor)
@@ -234,7 +191,7 @@ func MsmG2OnDevice(scalars_d, points_d unsafe.Pointer, count, bucketFactor int, 
 
 	if convert {
 		outHost := make([]icicle.G2Point, 1)
-		cudawrapper.CudaMemCpyDtoH[icicle.G2Point](outHost, out_d, 192)
+		cudawrapper.CudaMemCpyDtoH[icicle.G2Point](outHost, out_d, g2ProjPointBytes)
 		return *bls12377.G2PointToGnarkJac(&outHost[0]), nil, nil, timings
 	}
 

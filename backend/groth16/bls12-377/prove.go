@@ -216,7 +216,7 @@ func Prove(r1cs *cs.R1CS, pk *ProvingKey, fullWitness witness.Witness, opts ...b
 		_wireValues := filter(wireValues, r1cs.CommitmentInfo.PrivateToPublic())
 
 		scals := _wireValues[r1cs.GetNbPublicVariables():]
-		scalarBytes := len(scals) * 32
+		scalarBytes := len(scals) * fr.Bytes
 		scalars_d, _ := goicicle.CudaMalloc(scalarBytes)
 		goicicle.CudaMemCpyHtoD[fr.Element](scalars_d, scals, scalarBytes)
 		MontConvOnDevice(scalars_d, len(scals), false)
