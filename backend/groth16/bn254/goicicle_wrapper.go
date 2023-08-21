@@ -66,25 +66,6 @@ func NttOnDevice(scalars_out, scalars_d, twiddles_d, coset_powers_d unsafe.Point
 	return timings
 }
 
-func MsmBN254GnarkAdapter(points []curve.G1Affine, scalars []fr.Element) (curve.G1Jac, error, []time.Duration) {
-	var timings []time.Duration
-	out := new(icicle.G1ProjectivePoint)
-
-	convSTime := time.Now()
-	parsedScalars := bn254.BatchConvertFromFrGnark[icicle.G1ScalarField](scalars)
-	timings = append(timings, time.Since(convSTime))
-
-	convPTime := time.Now()
-	parsedPoints := bn254.BatchConvertFromG1Affine(points)
-	timings = append(timings, time.Since(convPTime))
-
-	msmTime := time.Now()
-	_, err := icicle.Msm(out, parsedPoints, parsedScalars, 0)
-	timings = append(timings, time.Since(msmTime))
-
-	return *bn254.G1ProjectivePointToGnarkJac(out), err, timings
-}
-
 func PolyOps(a_d, b_d, c_d, den_d unsafe.Pointer, size int) (timings []time.Duration) {
 	convSTime := time.Now()
 	ret := icicle.VecScalarMulMod(a_d, b_d, size)
