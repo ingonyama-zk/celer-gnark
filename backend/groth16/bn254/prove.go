@@ -18,9 +18,6 @@ package groth16
 
 import (
 	"fmt"
-	"math/big"
-	"time"
-	"unsafe"
 	"github.com/consensys/gnark-crypto/ecc"
 	curve "github.com/consensys/gnark-crypto/ecc/bn254"
 	"github.com/consensys/gnark-crypto/ecc/bn254/fr"
@@ -31,6 +28,9 @@ import (
 	"github.com/consensys/gnark/logger"
 	goicicle "github.com/ingonyama-zk/icicle/goicicle"
 	icicle "github.com/ingonyama-zk/icicle/goicicle/curves/bn254"
+	"math/big"
+	"time"
+	"unsafe"
 )
 
 // Proof represents a Groth16 proof that was encoded with a ProvingKey and can be verified
@@ -131,7 +131,7 @@ func Prove(r1cs *cs.R1CS, pk *ProvingKey, fullWitness witness.Witness, opts ...b
 		}
 
 		wireValuesASize := len(wireValuesA)
-		scalarBytes := wireValuesASize*fr.Bytes
+		scalarBytes := wireValuesASize * fr.Bytes
 		wireValuesADevicePtr, _ := goicicle.CudaMalloc(scalarBytes)
 		goicicle.CudaMemCpyHtoD[fr.Element](wireValuesADevicePtr, wireValuesA, scalarBytes)
 		MontConvOnDevice(wireValuesADevicePtr, wireValuesASize, false)
@@ -150,7 +150,7 @@ func Prove(r1cs *cs.R1CS, pk *ProvingKey, fullWitness witness.Witness, opts ...b
 		}
 
 		wireValuesBSize := len(wireValuesB)
-		scalarBytes := wireValuesBSize*fr.Bytes
+		scalarBytes := wireValuesBSize * fr.Bytes
 		wireValuesBDevicePtr, _ := goicicle.CudaMalloc(scalarBytes)
 		goicicle.CudaMemCpyHtoD[fr.Element](wireValuesBDevicePtr, wireValuesB, scalarBytes)
 		MontConvOnDevice(wireValuesBDevicePtr, wireValuesBSize, false)
@@ -183,7 +183,7 @@ func Prove(r1cs *cs.R1CS, pk *ProvingKey, fullWitness witness.Witness, opts ...b
 
 		icicleRes, _, _, time := MsmOnDevice(wireValuesBDevice.p, pk.G1Device.B, wireValuesBDevice.size, BUCKET_FACTOR, true)
 		log.Debug().Dur("took", time).Msg("Icicle API: MSM BS1 MSM")
-		
+
 		bs1 = icicleRes
 		bs1.AddMixed(&pk.G1.Beta)
 		bs1.AddMixed(&deltas[1])
@@ -191,7 +191,7 @@ func Prove(r1cs *cs.R1CS, pk *ProvingKey, fullWitness witness.Witness, opts ...b
 
 	computeAR1 := func() {
 		<-chWireValuesA
-		
+
 		icicleRes, _, _, timing := MsmOnDevice(wireValuesADevice.p, pk.G1Device.A, wireValuesADevice.size, BUCKET_FACTOR, true)
 		log.Debug().Dur("took", timing).Msg("Icicle API: MSM AR1 MSM")
 
@@ -210,23 +210,23 @@ func Prove(r1cs *cs.R1CS, pk *ProvingKey, fullWitness witness.Witness, opts ...b
 
 		icicleRes, _, _, timing := MsmOnDevice(h, pk.G1Device.Z, sizeH, BUCKET_FACTOR, true)
 		log.Debug().Dur("took", timing).Msg("Icicle API: MSM KRS2 MSM")
-		
+
 		krs2 = icicleRes
 		// filter the wire values if needed;
 		_wireValues := filter(wireValues, r1cs.CommitmentInfo.PrivateToPublic())
 
 		scals := _wireValues[r1cs.GetNbPublicVariables():]
-		scalarBytes := len(scals)*32
+		scalarBytes := len(scals) * fr.Bytes
 		scalars_d, _ := goicicle.CudaMalloc(scalarBytes)
 		goicicle.CudaMemCpyHtoD[fr.Element](scalars_d, scals, scalarBytes)
 		MontConvOnDevice(scalars_d, len(scals), false)
-		
+
 		icicleRes, _, _, timing = MsmOnDevice(scalars_d, pk.G1Device.K, len(scals), BUCKET_FACTOR, true)
 		log.Debug().Dur("took", timing).Msg("Icicle API: MSM KRS MSM")
-		
+
 		krs = icicleRes
 		krs.AddMixed(&deltas[2])
-		
+
 		krs.AddAssign(&krs2)
 
 		p1.ScalarMultiplication(&ar, &s)
@@ -244,7 +244,7 @@ func Prove(r1cs *cs.R1CS, pk *ProvingKey, fullWitness witness.Witness, opts ...b
 
 		<-chWireValuesB
 
-		icicleG2Res, _, _, timing  := MsmG2OnDevice(wireValuesBDevice.p, pk.G2Device.B, wireValuesBDevice.size, BUCKET_FACTOR, true)
+		icicleG2Res, _, _, timing := MsmG2OnDevice(wireValuesBDevice.p, pk.G2Device.B, wireValuesBDevice.size, BUCKET_FACTOR, true)
 		log.Debug().Dur("took", timing).Msg("Icicle API: MSM G2 BS")
 
 		Bs = icicleG2Res
@@ -269,7 +269,7 @@ func Prove(r1cs *cs.R1CS, pk *ProvingKey, fullWitness witness.Witness, opts ...b
 		return nil, err
 	}
 	log.Debug().Dur("took", time.Since(startMSM)).Msg("Total MSM time")
-	
+
 	log.Debug().Dur("took", time.Since(start)).Msg("prover done; TOTAL PROVE TIME")
 
 	return proof, nil
@@ -315,7 +315,7 @@ func computeH(a, b, c []fr.Element, pk *ProvingKey) unsafe.Pointer {
 	n = len(a)
 
 	sizeBytes := n * fr.Bytes
-	
+
 	log := logger.Logger()
 
 	/*********** Copy a,b,c to Device Start ************/
@@ -329,19 +329,19 @@ func computeH(a, b, c []fr.Element, pk *ProvingKey) unsafe.Pointer {
 	go CopyToDevice(b, sizeBytes, copyBDone)
 	go CopyToDevice(c, sizeBytes, copyCDone)
 
-	a_device := <- copyADone
-	b_device := <- copyBDone
-	c_device := <- copyCDone
+	a_device := <-copyADone
+	b_device := <-copyBDone
+	c_device := <-copyCDone
 
 	log.Debug().Dur("took", time.Since(convTime)).Msg("Icicle API: Conv and Copy a,b,c")
 	/*********** Copy a,b,c to Device End ************/
-	
+
 	computeInttNttDone := make(chan error, 1)
-	computeInttNttOnDevice := func (devicePointer unsafe.Pointer) {
+	computeInttNttOnDevice := func(devicePointer unsafe.Pointer) {
 		a_intt_d, timings_a := INttOnDevice(devicePointer, pk.DomainDevice.TwiddlesInv, nil, n, sizeBytes, false)
 		log.Debug().Dur("took", timings_a[0]).Msg("Icicle API: INTT Reverse")
 		log.Debug().Dur("took", timings_a[1]).Msg("Icicle API: INTT Interp")
-		
+
 		timing_a2 := NttOnDevice(devicePointer, a_intt_d, pk.DomainDevice.Twiddles, pk.DomainDevice.CosetTable, n, n, sizeBytes, true)
 		log.Debug().Dur("took", timing_a2[1]).Msg("Icicle API: NTT Coset Reverse")
 		log.Debug().Dur("took", timing_a2[0]).Msg("Icicle API: NTT Coset Eval")
@@ -353,7 +353,7 @@ func computeH(a, b, c []fr.Element, pk *ProvingKey) unsafe.Pointer {
 	go computeInttNttOnDevice(a_device)
 	go computeInttNttOnDevice(b_device)
 	go computeInttNttOnDevice(c_device)
-	_, _, _ = <- computeInttNttDone, <- computeInttNttDone, <- computeInttNttDone
+	_, _, _ = <-computeInttNttDone, <-computeInttNttDone, <-computeInttNttDone
 	log.Debug().Dur("took", time.Since(computeInttNttTime)).Msg("Icicle API: INTT and NTT")
 
 	poltime := PolyOps(a_device, b_device, c_device, pk.DenDevice, n)
@@ -364,9 +364,9 @@ func computeH(a, b, c []fr.Element, pk *ProvingKey) unsafe.Pointer {
 	h, timings_final := INttOnDevice(a_device, pk.DomainDevice.TwiddlesInv, pk.DomainDevice.CosetTableInv, n, sizeBytes, true)
 	log.Debug().Dur("took", timings_final[0]).Msg("Icicle API: INTT Coset Reverse")
 	log.Debug().Dur("took", timings_final[1]).Msg("Icicle API: INTT Coset Interp")
-	
+
 	icicle.ReverseScalars(h, n)
 	log.Debug().Dur("took", time.Since(computeHTime)).Msg("Icicle API: computeH")
-	
+
 	return h
 }

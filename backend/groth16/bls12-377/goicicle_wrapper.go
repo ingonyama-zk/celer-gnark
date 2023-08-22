@@ -5,12 +5,12 @@ import (
 	"time"
 	"unsafe"
 
-	curve "github.com/consensys/gnark-crypto/ecc/bn254"
-	"github.com/consensys/gnark-crypto/ecc/bn254/fp"
-	"github.com/consensys/gnark-crypto/ecc/bn254/fr"
+	curve "github.com/consensys/gnark-crypto/ecc/bls12-377"
+	"github.com/consensys/gnark-crypto/ecc/bls12-377/fp"
+	"github.com/consensys/gnark-crypto/ecc/bls12-377/fr"
 	cudawrapper "github.com/ingonyama-zk/icicle/goicicle"
-	icicle "github.com/ingonyama-zk/icicle/goicicle/curves/bn254"
-	"github.com/ingonyama-zk/iciclegnark/curves/bn254"
+	icicle "github.com/ingonyama-zk/icicle/goicicle/curves/bls12377"
+	"github.com/ingonyama-zk/iciclegnark/curves/bls12377"
 )
 
 type OnDeviceData struct {
@@ -94,6 +94,7 @@ func PolyOps(a_d, b_d, c_d, den_d unsafe.Pointer, size int) (timings []time.Dura
 
 func MsmOnDevice(scalars_d, points_d unsafe.Pointer, count, bucketFactor int, convert bool) (curve.G1Jac, unsafe.Pointer, error, time.Duration) {
 	g1ProjPointBytes := fp.Bytes * 3
+
 	out_d, _ := cudawrapper.CudaMalloc(g1ProjPointBytes)
 
 	msmTime := time.Now()
@@ -103,14 +104,14 @@ func MsmOnDevice(scalars_d, points_d unsafe.Pointer, count, bucketFactor int, co
 	if convert {
 		outHost := make([]icicle.G1ProjectivePoint, 1)
 		cudawrapper.CudaMemCpyDtoH[icicle.G1ProjectivePoint](outHost, out_d, g1ProjPointBytes)
-		return *bn254.G1ProjectivePointToGnarkJac(&outHost[0]), nil, nil, timings
+		return *bls12377.G1ProjectivePointToGnarkJac(&outHost[0]), nil, nil, timings
 	}
 
 	return curve.G1Jac{}, out_d, nil, timings
 }
 
 func MsmG2OnDevice(scalars_d, points_d unsafe.Pointer, count, bucketFactor int, convert bool) (curve.G2Jac, unsafe.Pointer, error, time.Duration) {
-	g2ProjPointBytes := fp.Bytes * 6
+	g2ProjPointBytes := fp.Bytes * 6 // X,Y,Z each with A0, A1 of fp.Bytes
 	out_d, _ := cudawrapper.CudaMalloc(g2ProjPointBytes)
 
 	msmTime := time.Now()
@@ -120,7 +121,7 @@ func MsmG2OnDevice(scalars_d, points_d unsafe.Pointer, count, bucketFactor int, 
 	if convert {
 		outHost := make([]icicle.G2Point, 1)
 		cudawrapper.CudaMemCpyDtoH[icicle.G2Point](outHost, out_d, g2ProjPointBytes)
-		return *bn254.G2PointToGnarkJac(&outHost[0]), nil, nil, timings
+		return *bls12377.G2PointToGnarkJac(&outHost[0]), nil, nil, timings
 	}
 
 	return curve.G2Jac{}, out_d, nil, timings

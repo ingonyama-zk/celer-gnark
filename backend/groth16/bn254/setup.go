@@ -18,7 +18,6 @@ package groth16
 
 import (
 	"fmt"
-	"github.com/ingonyama-zk/iciclegnark/curves/bn254"
 	"math"
 	"math/big"
 	"math/bits"
@@ -32,8 +31,9 @@ import (
 	"github.com/consensys/gnark-crypto/ecc/bn254/fr/pedersen"
 	"github.com/consensys/gnark/constraint"
 	"github.com/consensys/gnark/constraint/bn254"
-	goicicle "github.com/ingonyama-zk/icicle/goicicle"
+	"github.com/ingonyama-zk/icicle/goicicle"
 	icicle "github.com/ingonyama-zk/icicle/goicicle/curves/bn254"
+	"github.com/ingonyama-zk/iciclegnark/curves/bn254"
 )
 
 // ProvingKey is used by a Groth16 prover to encode a proof of a statement
