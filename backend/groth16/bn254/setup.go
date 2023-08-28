@@ -53,6 +53,10 @@ type ProvingKey struct {
 		A, B, K, Z			unsafe.Pointer
 	}
 
+	G1InfPointIndices struct {
+		A, B, K, Z			[]int
+	}
+
 	DomainDevice struct {
 		Twiddles, TwiddlesInv		unsafe.Pointer
 		CosetTable, CosetTableInv	unsafe.Pointer
@@ -407,9 +411,18 @@ func (pk *ProvingKey) setupDevicePointers() {
 	pk.G1Device.B = b_d
 	
 	/*************************     K      ***************************/
-	pointsBytesK := len(pk.G1.K) * fp.Bytes * 2
+	//remove infinity points and save indices for removing scalars later
+	pointsNoInfinity := pk.G1.K
+	for i, gnarkPoint := range pointsNoInfinity {
+		if gnarkPoint.IsInfinity() {
+			pk.G1InfPointIndices.K = append(pk.G1InfPointIndices.K, i)
+			pointsNoInfinity = append(pointsNoInfinity[:i], pointsNoInfinity[i+1:]...)
+		}
+	}
+
+	pointsBytesK := len(pointsNoInfinity) * fp.Bytes * 2
 	k_d, _ := goicicle.CudaMalloc(pointsBytesK)
-	iciclePointsK := icicle.BatchConvertFromG1Affine(pk.G1.K)
+	iciclePointsK := icicle.BatchConvertFromG1Affine(pointsNoInfinity)
 	goicicle.CudaMemCpyHtoD[icicle.PointAffineNoInfinityBN254](k_d, iciclePointsK, pointsBytesK)
 	
 	pk.G1Device.K = k_d
