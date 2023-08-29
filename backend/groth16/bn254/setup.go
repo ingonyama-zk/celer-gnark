@@ -413,11 +413,13 @@ func (pk *ProvingKey) setupDevicePointers() {
 
 	/*************************     K      ***************************/
 	//remove infinity points and save indices for removing scalars later
-	pointsNoInfinity := pk.G1.K
-	for i, gnarkPoint := range pointsNoInfinity {
+	// TODO, find better way to save mem
+	var pointsNoInfinity []curve.G1Affine
+	for i, gnarkPoint := range pk.G1.K {
 		if gnarkPoint.IsInfinity() {
 			pk.G1InfPointIndices.K = append(pk.G1InfPointIndices.K, i)
-			pointsNoInfinity = append(pointsNoInfinity[:i], pointsNoInfinity[i+1:]...)
+		} else {
+			pointsNoInfinity = append(pointsNoInfinity, gnarkPoint)
 		}
 	}
 
