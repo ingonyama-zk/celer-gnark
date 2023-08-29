@@ -216,6 +216,12 @@ func Prove(r1cs *cs.R1CS, pk *ProvingKey, fullWitness witness.Witness, opts ...b
 		_wireValues := filter(wireValues, r1cs.CommitmentInfo.PrivateToPublic())
 
 		scals := _wireValues[r1cs.GetNbPublicVariables():]
+
+		// Filter scalars matching infinity point indices
+		for _, indexToRemove := range pk.G1InfPointIndices.K {
+			scals = append(scals[:indexToRemove], scals[indexToRemove+1:]...)
+		}
+
 		scalarBytes := len(scals) * fr.Bytes
 		scalars_d, _ := goicicle.CudaMalloc(scalarBytes)
 		goicicle.CudaMemCpyHtoD[fr.Element](scalars_d, scals, scalarBytes)
