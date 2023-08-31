@@ -230,6 +230,8 @@ func Prove(r1cs *cs.R1CS, pk *ProvingKey, fullWitness witness.Witness, opts ...b
 		icicleRes, _, _, timing = MsmOnDevice(scalars_d, pk.G1Device.K, len(scals), BUCKET_FACTOR, true)
 		log.Debug().Dur("took", timing).Msg("Icicle API: MSM KRS MSM")
 
+		goicicle.CudaFree(scalars_d)
+
 		krs = icicleRes
 		krs.AddMixed(&deltas[2])
 
@@ -277,6 +279,12 @@ func Prove(r1cs *cs.R1CS, pk *ProvingKey, fullWitness witness.Witness, opts ...b
 	log.Debug().Dur("took", time.Since(startMSM)).Msg("Total MSM time")
 
 	log.Debug().Dur("took", time.Since(start)).Msg("prover done; TOTAL PROVE TIME")
+
+	go func() {
+		goicicle.CudaFree(wireValuesADevice.p)
+		goicicle.CudaFree(wireValuesBDevice.p)
+		goicicle.CudaFree(h)
+	}()
 
 	return proof, nil
 }
@@ -353,6 +361,8 @@ func computeH(a, b, c []fr.Element, pk *ProvingKey) unsafe.Pointer {
 		log.Debug().Dur("took", timing_a2[0]).Msg("Icicle API: NTT Coset Eval")
 
 		computeInttNttDone <- nil
+
+		goicicle.CudaFree(a_intt_d)
 	}
 
 	computeInttNttTime := time.Now()
@@ -370,6 +380,12 @@ func computeH(a, b, c []fr.Element, pk *ProvingKey) unsafe.Pointer {
 	h, timings_final := INttOnDevice(a_device, pk.DomainDevice.TwiddlesInv, pk.DomainDevice.CosetTableInv, n, sizeBytes, true)
 	log.Debug().Dur("took", timings_final[0]).Msg("Icicle API: INTT Coset Reverse")
 	log.Debug().Dur("took", timings_final[1]).Msg("Icicle API: INTT Coset Interp")
+
+	go func() {
+		goicicle.CudaFree(a_device)
+		goicicle.CudaFree(b_device)
+		goicicle.CudaFree(c_device)
+	}()
 
 	icicle.ReverseScalars(h, n)
 	log.Debug().Dur("took", time.Since(computeHTime)).Msg("Icicle API: computeH")
