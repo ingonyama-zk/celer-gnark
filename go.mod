@@ -10,7 +10,7 @@ require (
 	github.com/fxamacker/cbor/v2 v2.4.0
 	github.com/google/go-cmp v0.5.9
 	github.com/google/pprof v0.0.0-20230309165930-d61513b1440d
-	github.com/ingonyama-zk/icicle v0.0.0-20230817090824-e04bd928e658
+	github.com/ingonyama-zk/icicle v0.0.0-20230831061944-5667f32bfedd
 	github.com/ingonyama-zk/iciclegnark v0.0.0-20230817103837-e600ab198a16
 	github.com/leanovate/gopter v0.2.9
 	github.com/rs/zerolog v1.29.0
@@ -34,3 +34,5 @@ require (
 )
 
 replace github.com/consensys/gnark-crypto => github.com/celer-network/gnark-crypto v0.0.0-20230423085214-c00cabca6125
+
+replace github.com/ingonyama-zk/iciclegnark => github.com/liuxiaobleach/iciclegnark v0.0.0-20230901055628-0ff7b710d3d7

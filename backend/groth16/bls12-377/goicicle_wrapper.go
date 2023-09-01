@@ -104,7 +104,9 @@ func MsmOnDevice(scalars_d, points_d unsafe.Pointer, count, bucketFactor int, co
 	if convert {
 		outHost := make([]icicle.G1ProjectivePoint, 1)
 		cudawrapper.CudaMemCpyDtoH[icicle.G1ProjectivePoint](outHost, out_d, g1ProjPointBytes)
-		return *bls12377.G1ProjectivePointToGnarkJac(&outHost[0]), nil, nil, timings
+		retPoint := *bls12377.G1ProjectivePointToGnarkJac(&outHost[0])
+		cudawrapper.CudaFree(out_d)
+		return retPoint, nil, nil, timings
 	}
 
 	return curve.G1Jac{}, out_d, nil, timings
@@ -121,7 +123,9 @@ func MsmG2OnDevice(scalars_d, points_d unsafe.Pointer, count, bucketFactor int, 
 	if convert {
 		outHost := make([]icicle.G2Point, 1)
 		cudawrapper.CudaMemCpyDtoH[icicle.G2Point](outHost, out_d, g2ProjPointBytes)
-		return *bls12377.G2PointToGnarkJac(&outHost[0]), nil, nil, timings
+		retPoint := *bls12377.G2PointToGnarkJac(&outHost[0])
+		cudawrapper.CudaFree(out_d)
+		return retPoint, nil, nil, timings
 	}
 
 	return curve.G2Jac{}, out_d, nil, timings
