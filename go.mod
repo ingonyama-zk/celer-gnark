@@ -35,4 +35,4 @@ require (
 
 replace github.com/consensys/gnark-crypto => github.com/celer-network/gnark-crypto v0.0.0-20230423085214-c00cabca6125
 
-replace github.com/ingonyama-zk/iciclegnark => github.com/liuxiaobleach/iciclegnark v0.0.0-20230901055628-0ff7b710d3d7
+replace github.com/ingonyama-zk/iciclegnark => github.com/liuxiaobleach/iciclegnark v0.0.0-20230901070101-d3930fd13443
